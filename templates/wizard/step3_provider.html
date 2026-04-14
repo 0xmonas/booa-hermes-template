@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Step 3 — LLM Provider{% endblock %}
+{% block subtitle %}step 3 of 4 — choose your AI provider{% endblock %}
+
+{% block content %}
+<div class="steps">
+  <div class="step done"></div>
+  <div class="step done"></div>
+  <div class="step active"></div>
+  <div class="step"></div>
+</div>
+
+<div class="card">
+  <div class="info-box">
+    Your agent needs an AI provider to think. <a href="https://openrouter.ai/" target="_blank">OpenRouter</a>
+    is recommended — free to sign up, some models are free.
+  </div>
+
+  <form method="POST" action="/wizard/step3">
+    <label>
+      <span>Provider</span>
+      <select name="provider" id="provider" onchange="updateModels()">
+        <option value="openrouter" selected>OpenRouter (recommended)</option>
+        <option value="anthropic">Anthropic (Claude)</option>
+        <option value="openai">OpenAI</option>
+        <option value="nous">Nous Portal</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="custom">Custom endpoint</option>
+      </select>
+    </label>
+    <label>
+      <span>API Key</span>
+      <input type="password" name="api_key" required placeholder="sk-or-...">
+    </label>
+    <label>
+      <span>Model</span>
+      <select name="model" id="model"></select>
+    </label>
+    <div class="info-box mt-2" id="model-info"></div>
+    <button type="submit" class="mt-2">Save & Continue</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const models = {
+  openrouter: [
+    { value: "nousresearch/hermes-3-llama-3.1-405b:free", label: "Hermes 3 405B (free)", info: "Free tier — great for testing" },
+    { value: "google/gemma-3-1b-it:free", label: "Gemma 3 1B (free)", info: "Free tier — lightweight" },
+    { value: "anthropic/claude-sonnet-4-6", label: "Claude Sonnet 4.6", info: "$3/$15 per MTok — fast + intelligent" },
+    { value: "anthropic/claude-opus-4-6", label: "Claude Opus 4.6", info: "$5/$25 per MTok — most intelligent" },
+    { value: "anthropic/claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", info: "$1/$5 per MTok — fastest" },
+    { value: "openai/gpt-4o", label: "GPT-4o", info: "$2.50/$10 per MTok" },
+    { value: "google/gemini-2.5-flash-preview", label: "Gemini 2.5 Flash", info: "Fast + affordable" },
+    { value: "deepseek/deepseek-chat-v3-0324", label: "DeepSeek V3", info: "$0.27/$1.10 per MTok — budget" },
+  ],
+  anthropic: [
+    { value: "claude-opus-4-6", label: "Claude Opus 4.6", info: "$5/$25 per MTok — most intelligent, 1M context" },
+    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", info: "$3/$15 per MTok — fast + intelligent, 1M context" },
+    { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", info: "$1/$5 per MTok — fastest, 200k context" },
+  ],
+  openai: [
+    { value: "gpt-4o", label: "GPT-4o", info: "$2.50/$10 per MTok" },
+    { value: "gpt-4o-mini", label: "GPT-4o Mini", info: "$0.15/$0.60 per MTok — budget" },
+    { value: "o3", label: "o3", info: "Reasoning model" },
+    { value: "o4-mini", label: "o4 Mini", info: "Fast reasoning model" },
+  ],
+  nous: [
+    { value: "nousresearch/hermes-3-llama-3.1-405b", label: "Hermes 3 405B", info: "Native Hermes model" },
+    { value: "nousresearch/hermes-3-llama-3.1-70b", label: "Hermes 3 70B", info: "Smaller + faster" },
+  ],
+  deepseek: [
+    { value: "deepseek-chat", label: "DeepSeek Chat V3", info: "$0.27/$1.10 per MTok" },
+    { value: "deepseek-reasoner", label: "DeepSeek Reasoner", info: "Reasoning model" },
+  ],
+  custom: [
+    { value: "", label: "Enter model ID manually", info: "Type the model identifier for your endpoint" },
+  ],
+};
+
+function updateModels() {
+  const provider = document.getElementById('provider').value;
+  const select = document.getElementById('model');
+  const info = document.getElementById('model-info');
+  const list = models[provider] || models.custom;
+
+  select.innerHTML = '';
+  list.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.value;
+    opt.textContent = m.label;
+    select.appendChild(opt);
+  });
+
+  if (provider === 'custom') {
+    select.outerHTML = '<input type="text" name="model" id="model" placeholder="e.g. my-model/v1">';
+    info.textContent = 'Enter any OpenAI-compatible model ID and set the base URL in your API key.';
+  } else {
+    info.textContent = list[0].info;
+    select.onchange = () => {
+      const selected = list.find(m => m.value === select.value);
+      info.textContent = selected ? selected.info : '';
+    };
+  }
+}
+
+updateModels();
+</script>
+{% endblock %}

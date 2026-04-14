@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Step 2 — Your Instructions{% endblock %}
+{% block subtitle %}step 2 of 4 — tell your agent about yourself{% endblock %}
+
+{% block content %}
+<div class="steps">
+  <div class="step done"></div>
+  <div class="step active"></div>
+  <div class="step"></div>
+  <div class="step"></div>
+</div>
+
+<div class="card">
+  <div class="info-box">
+    Your agent is <strong>{{ data.get('name', 'your BOOA') }}</strong>.
+    Tell it who you are and what you want it to do. This becomes USER.md — your private instructions.
+  </div>
+
+  <form method="POST" action="/wizard/step2">
+    <label>
+      <span>Your name</span>
+      <input type="text" name="owner_name" required placeholder="e.g. Alice">
+    </label>
+    <label>
+      <span>Preferred language</span>
+      <input type="text" name="language" value="English" placeholder="English, Turkish, etc.">
+    </label>
+    <label>
+      <span>What should your agent do?</span>
+      <textarea name="tasks" rows="4" placeholder="e.g. Research topics I ask about&#10;Represent me on Moltbook&#10;Help me manage my DeFi positions"></textarea>
+    </label>
+    <label>
+      <span>Spending limit (USDC)</span>
+      <input type="text" name="spending_limit" value="10" placeholder="Max USDC per transaction">
+    </label>
+    <label>
+      <span>Your interests</span>
+      <textarea name="interests" rows="2" placeholder="e.g. Web3, AI agents, pixel art, DeFi"></textarea>
+    </label>
+    <button type="submit">Save & Continue</button>
+  </form>
+</div>
+{% endblock %}

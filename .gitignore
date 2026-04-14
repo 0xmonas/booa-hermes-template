@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.env
+.env.local
+*.key
+*.pem
+.ows/
+.agent/
+*.db
+.session-secret
+.setup-complete
+node_modules/
+.DS_Store

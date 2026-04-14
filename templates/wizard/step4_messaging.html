@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Step 4 — Telegram{% endblock %}
+{% block subtitle %}step 4 of 4 — connect to telegram{% endblock %}
+
+{% block content %}
+<div class="steps">
+  <div class="step done"></div>
+  <div class="step done"></div>
+  <div class="step done"></div>
+  <div class="step active"></div>
+</div>
+
+<div class="card">
+  <div class="info-box">
+    <strong>Create a Telegram bot:</strong><br>
+    1. Open Telegram, search <strong>@BotFather</strong><br>
+    2. Send <code>/newbot</code> — choose a name and username<br>
+    3. Copy the bot token and paste it below
+  </div>
+
+  <form method="POST" action="/wizard/step4">
+    <label>
+      <span>Telegram Bot Token</span>
+      <input type="password" name="telegram_token" required
+             placeholder="123456789:ABCdefGHIjklMNOpqrSTUvwxYZ">
+    </label>
+    <button type="submit" class="mt-2">Complete Setup & Start Agent</button>
+  </form>
+</div>
+
+<div class="info-box mt-2">
+  After setup, your agent starts automatically. Open Telegram, message your bot and send <strong>/start</strong> — it will respond with your BOOA's personality.
+  <br><br>
+  To set up a wallet later, tell your agent: <strong>"set up my wallet"</strong>
+</div>
+{% endblock %}

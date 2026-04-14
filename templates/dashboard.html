@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — {{ data.get('name', 'Khôra Agent') }}{% endblock %}
+{% block subtitle %}{{ data.get('name', 'agent') }} — BOOA #{{ data.get('token_id', '?') }}{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="agent-preview">
+    {% if avatar_svg %}
+    <div>{{ avatar_svg | safe }}</div>
+    {% endif %}
+    <div class="agent-info">
+      <h2>{{ data.get('name', 'BOOA Agent') }} {{ data.get('emoji', '') }}</h2>
+      <p>{{ data.get('creature', '')[:100] }}</p>
+      <p>{{ data.get('vibe', '') }}</p>
+    </div>
+  </div>
+</div>
+
+<!-- Identity & Wallet status -->
+{% if verified == false %}
+<div class="error">
+  <strong>Not Verified:</strong> ERC-8004 registration does not match the NFT owner.
+  <a href="https://8004scan.io" target="_blank">Check on 8004scan.io</a>
+</div>
+{% elif verified == true %}
+<div class="card" style="border-color: var(--green);">
+  <div class="flex items-center justify-between">
+    <span class="status-badge active">8004 Identity Verified</span>
+    {% if wallet_address and agent_wallet_registered %}
+    <span class="status-badge active">Agent Wallet Registered</span>
+    {% elif wallet_address and not agent_wallet_registered %}
+    <span class="status-badge" style="border-color:var(--red);color:var(--red);">New Wallet Not Linked</span>
+    {% endif %}
+  </div>
+  {% if wallet_address or registered_by %}
+  <div class="info-box mt-2">
+    {% if registered_by %}
+    <div class="stat"><strong>8004 Owner:</strong> <code>{{ registered_by[:6] }}...{{ registered_by[-4:] }}</code></div>
+    {% endif %}
+    {% if nft_owner %}
+    <div class="stat"><strong>NFT Owner:</strong> <code>{{ nft_owner[:6] }}...{{ nft_owner[-4:] }}</code></div>
+    {% endif %}
+    {% if wallet_address %}
+    <div class="stat"><strong>Hermes Wallet:</strong> <code>{{ wallet_address[:6] }}...{{ wallet_address[-4:] }}</code>
+      {% if agent_wallet_registered %}
+      <span class="text-green">linked</span>
+      {% else %}
+      <span style="color:var(--red);">not linked</span>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if wallet_address and not agent_wallet_registered %}
+    <div class="mt-2 text-xs">
+      To link this wallet, go to <a href="https://8004scan.io/my-agents" target="_blank">8004scan.io/my-agents</a> and set <code>{{ wallet_address }}</code> as your agent wallet, or transfer 8004 ownership to it.
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Error alerts (populated by JS) -->
+<div class="error" id="error-card" style="display:none;">
+  <strong>Error:</strong> <span id="error-message"></span>
+</div>
+
+<div class="card">
+  <div class="flex items-center justify-between mb-2">
+    <div>
+      <span class="status-dot {{ 'running' if gateway_running else 'stopped' }}"></span>
+      <strong>Gateway {{ 'RUNNING' if gateway_running else 'STOPPED' }}</strong>
+    </div>
+    <div>
+      {% if gateway_running %}
+      <button onclick="gatewayAction('stop')" class="btn-sm btn-outline">Stop</button>
+      {% else %}
+      <button onclick="gatewayAction('start')" class="btn-sm">Start</button>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <div class="stat"><strong>Provider:</strong> {{ data.get('provider', '?') }}</div>
+    <div class="stat"><strong>Model:</strong> {{ data.get('model', '?') }}</div>
+    <div class="stat"><strong>Skills:</strong> {{ ', '.join(data.get('skills_installed', [])) or 'none' }}</div>
+    <div class="stat"><strong>Uptime:</strong> {{ '%dh %dm' % (uptime // 3600, (uptime % 3600) // 60) if uptime > 0 else 'stopped' }}</div>
+    {% if wallet_address %}
+    <div class="stat"><strong>Wallet:</strong> <code>{{ wallet_address[:6] }}...{{ wallet_address[-4:] }}</code> <span onclick="navigator.clipboard.writeText('{{ wallet_address }}');this.textContent='copied!';setTimeout(()=>this.textContent='copy',1500)" style="cursor:pointer;color:var(--muted);text-decoration:underline;">copy</span></div>
+    {% else %}
+    <div class="stat"><strong>Wallet:</strong> <span class="text-muted">not set — tell your agent "set up my wallet"</span></div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card" id="pairing-section">
+  <h3>Telegram Pairing</h3>
+  <div id="pairing-connected" style="display:none;">
+    <div class="status-badge active mb-2">Connected</div>
+    <div id="pairing-users" class="text-xs text-muted"></div>
+  </div>
+  <div id="pairing-setup">
+    <div class="info-box mb-2">
+      1. Open Telegram and message your bot<br>
+      2. Send <strong>/start</strong><br>
+      3. The bot replies with a <strong>pairing code</strong><br>
+      4. Approve it below
+    </div>
+    <div id="pairing-pending"></div>
+    <div id="pairing-empty" class="text-xs text-muted">No pending requests. Message your bot to start pairing.</div>
+  </div>
+</div>
+
+<div class="flex gap-2 mb-4">
+  <a href="/logs" class="btn btn-outline w-full text-center">View Logs</a>
+  <a href="/settings" class="btn btn-outline w-full text-center">Settings</a>
+  <a href="#" onclick="confirmExport()" class="btn btn-outline w-full text-center">Export Data</a>
+</div>
+
+<form method="POST" action="/settings/reset" style="text-align: center;">
+  <button type="submit" class="btn-sm btn-outline">Re-run Setup Wizard</button>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function gatewayAction(action) {
+  await fetch(`/gateway/${action}`, { method: 'POST' });
+  location.reload();
+}
+
+async function checkErrors() {
+  const res = await fetch('/gateway/errors');
+  const data = await res.json();
+  const card = document.getElementById('error-card');
+  const msg = document.getElementById('error-message');
+
+  if (data.errors && data.errors.length > 0) {
+    const latest = data.errors[data.errors.length - 1];
+    card.style.display = 'block';
+
+    if (latest.includes('credit balance is too low') || latest.includes('Rate limited')) {
+      msg.textContent = 'Your LLM provider returned an error. Check your API key credits and billing. Go to Settings to update.';
+    } else if (latest.includes('Invalid token') || latest.includes('Unauthorized')) {
+      msg.textContent = 'Telegram bot token is invalid. Go to Settings to update.';
+    } else {
+      msg.textContent = latest.slice(0, 200);
+    }
+  } else {
+    card.style.display = 'none';
+  }
+}
+
+async function checkPairing() {
+  const res = await fetch('/pairing');
+  const data = await res.json();
+  const pending = document.getElementById('pairing-pending');
+  const empty = document.getElementById('pairing-empty');
+  const setup = document.getElementById('pairing-setup');
+  const connected = document.getElementById('pairing-connected');
+  const users = document.getElementById('pairing-users');
+
+  // Check if any users are already approved
+  if (data.approved && data.approved.length > 0) {
+    connected.style.display = 'block';
+    users.textContent = data.approved.map(u => u.user_name || u.user_id).join(', ');
+    if (!data.pending || data.pending.length === 0) {
+      setup.style.display = 'none';
+    }
+  }
+
+  if (data.pending && data.pending.length > 0) {
+    setup.style.display = 'block';
+    empty.style.display = 'none';
+    pending.innerHTML = data.pending.map(p => `
+      <div class="flex items-center justify-between" style="padding:8px 0;border-bottom:1px solid var(--border);">
+        <div>
+          <strong>${p.user_name || 'Unknown'}</strong>
+          <span class="text-xs text-muted"> — code: ${p.code} — ${p.age_minutes}m ago</span>
+        </div>
+        <div class="flex gap-1">
+          <button onclick="pairingAction('approve','${p.platform}','${p.code}')" class="btn-sm">Approve</button>
+          <button onclick="pairingAction('deny','${p.platform}','${p.code}')" class="btn-sm btn-outline">Deny</button>
+        </div>
+      </div>
+    `).join('');
+  } else if (!data.approved || data.approved.length === 0) {
+    empty.style.display = 'block';
+    pending.innerHTML = '';
+  }
+}
+
+async function pairingAction(action, platform, code) {
+  await fetch(`/pairing/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ platform, code })
+  });
+  checkPairing();
+}
+
+function confirmExport() {
+  const pw = prompt('Enter your admin password to export data:');
+  if (pw) {
+    window.location.href = '/download?pw=' + encodeURIComponent(pw);
+  }
+}
+
+setInterval(() => { checkPairing(); checkErrors(); }, 3000);
+checkPairing();
+checkErrors();
+</script>
+{% endblock %}

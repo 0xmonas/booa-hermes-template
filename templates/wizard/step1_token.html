@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Step 1 — Token ID{% endblock %}
+{% block subtitle %}step 1 of 4 — enter your BOOA token ID{% endblock %}
+
+{% block content %}
+<div class="steps">
+  <div class="step active"></div>
+  <div class="step"></div>
+  <div class="step"></div>
+  <div class="step"></div>
+</div>
+
+<div class="card">
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+
+  <div class="info-box">
+    Enter your BOOA token ID. Find it on
+    <a href="https://opensea.io/collection/booa" target="_blank">OpenSea</a> or
+    <a href="https://khora.fun/bridge" target="_blank">khora.fun/bridge</a>.
+  </div>
+
+  <form method="POST" action="/wizard/step1">
+    <label>
+      <span>Token ID</span>
+      <input type="number" name="token_id" min="0" max="3332" required
+             placeholder="e.g. 1496"
+             value="{{ data.get('token_id', '') if data.get('token_id') else '' }}">
+    </label>
+    <button type="submit">Fetch Agent Identity</button>
+  </form>
+</div>
+
+{% if data.get('name') %}
+<div class="card">
+  <div class="agent-preview">
+    {% if data.get('avatar_svg') %}
+    <div>{{ data.avatar_svg | safe }}</div>
+    {% endif %}
+    <div class="agent-info">
+      <h2>{{ data.name }} {{ data.get('emoji', '') }}</h2>
+      <p>{{ data.get('creature', '')[:80] }}{% if data.get('creature', '')|length > 80 %}...{% endif %}</p>
+      <p>{{ data.get('vibe', '') }}</p>
+    </div>
+  </div>
+  <p class="text-green text-xs mt-2">Identity loaded. Proceed to step 2.</p>
+</div>
+{% endif %}
+{% endblock %}

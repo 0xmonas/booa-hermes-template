@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Logs — Khôra Agent{% endblock %}
+{% block subtitle %}gateway logs{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 1rem;">
+  <a href="/dashboard" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.3rem 0.8rem;">← Dashboard</a>
+</div>
+
+<div class="card">
+  <div class="log-viewer" id="log-viewer">{% for line in logs %}{{ line }}
+{% endfor %}</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const viewer = document.getElementById('log-viewer');
+const evtSource = new EventSource('/logs/stream');
+
+evtSource.onmessage = function(event) {
+  viewer.textContent += event.data + '\n';
+  viewer.scrollTop = viewer.scrollHeight;
+};
+
+evtSource.onerror = function() {
+  viewer.textContent += '[connection lost — refresh to reconnect]\n';
+};
+</script>
+{% endblock %}

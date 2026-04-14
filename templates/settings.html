@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Settings — Khôra Agent{% endblock %}
+{% block subtitle %}agent settings{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 1rem;">
+  <a href="/dashboard" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.3rem 0.8rem;">← Dashboard</a>
+</div>
+
+<div class="card">
+  <h3 style="margin-bottom: 0.8rem; font-size: 0.9rem; color: var(--accent);">Agent Identity</h3>
+  <div class="stat"><strong>Name:</strong> {{ data.get('name', '?') }}</div>
+  <div class="stat"><strong>Token ID:</strong> {{ data.get('token_id', '?') }}</div>
+  <div class="stat"><strong>Creature:</strong> {{ data.get('creature', '?')[:60] }}</div>
+  <div class="stat"><strong>Vibe:</strong> {{ data.get('vibe', '?') }}</div>
+</div>
+
+<div class="card">
+  <h3 style="margin-bottom: 0.8rem; font-size: 0.9rem; color: var(--accent);">LLM Provider</h3>
+  <div class="stat"><strong>Provider:</strong> {{ data.get('provider', '?') }}</div>
+  <div class="stat"><strong>Model:</strong> {{ data.get('model', '?') }}</div>
+</div>
+
+<div class="card">
+  <h3 style="margin-bottom: 0.8rem; font-size: 0.9rem; color: var(--accent);">Skills</h3>
+  {% for skill in data.get('skills_installed', []) %}
+  <div class="stat">/<strong>{{ skill }}</strong></div>
+  {% endfor %}
+  <p style="color: var(--text-dim); font-size: 0.75rem; margin-top: 0.5rem;">
+    Your agent can install more skills from Telegram. Tell it: "install skill from [URL]"
+  </p>
+</div>
+
+<div class="card">
+  <h3 style="margin-bottom: 0.8rem; font-size: 0.9rem; color: var(--accent);">Useful Links</h3>
+  <div class="stat"><a href="https://khora.fun/skills/SKILL.md">Khôra SKILL.md</a> — agent setup guide</div>
+  <div class="stat"><a href="https://khora.fun/skills/references/wallet-setup.md">Wallet Setup</a> — OWS, 8004 ownership</div>
+  <div class="stat"><a href="https://8004scan.io">8004scan.io</a> — manage agent identity</div>
+  <div class="stat"><a href="https://khora.fun/api/agent-files/360/{{ data.get('token_id', '0') }}">Agent Files API</a> — your agent's data</div>
+</div>
+
+<div style="text-align: center; margin-top: 1rem;">
+  <form method="POST" action="/settings/reset">
+    <button type="submit" class="btn-danger" style="font-size: 0.8rem;">Reset & Re-run Wizard</button>
+  </form>
+</div>
+{% endblock %}

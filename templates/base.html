@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Khôra Agent{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>KHÔRA</h1>
+      <p class="subtitle">{% block subtitle %}BOOA Agent Setup{% endblock %}</p>
+    </div>
+    {% block content %}{% endblock %}
+    <div class="footer">
+      <a href="https://khora.fun">khora.fun</a>
+      <a href="https://8004scan.io">8004scan.io</a>
+      <a href="https://opensea.io/collection/booa">opensea</a>
+    </div>
+  </div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
