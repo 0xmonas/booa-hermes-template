@@ -4,7 +4,7 @@ Deploy your BOOA as an autonomous AI agent. One-click deploy on Railway, zero te
 
 By [Khôra](https://khora.fun)
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/dY7R1A?referralCode=gD4PGO&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 ---
 
