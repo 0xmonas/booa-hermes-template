@@ -3,11 +3,17 @@
 import os
 import yaml
 
+TEMPLATE_VERSION = "1.0.0"
+
 
 def ensure_dirs(hermes_home: str):
-    """Create Hermes directory structure."""
+    """Create Hermes directory structure and write version marker."""
     for d in ["memories", "skills", "sessions", "context", "workspace", "cron"]:
         os.makedirs(os.path.join(hermes_home, d), exist_ok=True)
+
+    version_path = os.path.join(hermes_home, ".template-version")
+    with open(version_path, "w") as f:
+        f.write(TEMPLATE_VERSION)
 
 
 def write_soul(hermes_home: str, soul_md: str):
