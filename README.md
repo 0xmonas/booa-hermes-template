@@ -6,6 +6,8 @@ By [Khôra](https://khora.fun)
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/dY7R1A?referralCode=gD4PGO&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
+[View on Railway Marketplace](https://railway.com/deploy/booa-hermes-template)
+
 ---
 
 ## What This Does
