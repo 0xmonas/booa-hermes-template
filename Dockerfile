@@ -14,8 +14,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-VOLUME /data
-
 ENV HERMES_HOME=/data/hermes
 ENV HOME=/data
 ENV PORT=8080
