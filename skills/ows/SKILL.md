@@ -3,7 +3,7 @@ name: ows
 version: 1.0.0
 description: Wallet setup and management via Open Wallet Standard. Create a new OWS wallet, import an existing vault, validate on-chain status, and link the wallet to the BOOA agent on ERC-8004. Uses the local OWS vault with policy-gated signing.
 homepage: https://openwallet.sh
-metadata: {"emoji":"🔐","vault_path":"/data/.hermes/wallets/","dashboard_sync":"/data/.agent/wallet-info.txt","primary_chains":["shape","base"]}
+metadata: {"emoji":"🔐","vault_path":"/data/.ows/","dashboard_sync":"/data/.agent/wallet-info.txt","primary_chains":["shape","base"]}
 ---
 
 # /ows — Wallet Setup
@@ -41,15 +41,17 @@ Ask the operator which flow applies:
 
 Follow `references/wallet-setup.md` step-by-step for the chosen scenario.
 
-Hermes-specific path overrides (use these, not the defaults in wallet-setup.md):
+On this Hermes template, the container runs with `HOME=/data`, so the OWS default vault path (`~/.ows/`) resolves to `/data/.ows/` — on the persistent Railway volume. No vault-path override is needed; just run the `ows` commands as written in `wallet-setup.md`.
+
+Paths you will read or write:
 
 | Purpose | Path |
 |---|---|
-| OWS vault | `/data/.hermes/wallets/` |
-| Policies | `/data/.hermes/wallets/policies/` |
+| OWS vault (wallets) | `/data/.ows/wallets/` |
+| OWS policies | `/data/.ows/policies/` |
+| OWS API keys | `/data/.ows/keys/` |
+| OWS audit log | `/data/.ows/logs/audit.jsonl` |
 | Dashboard sync file | `/data/.agent/wallet-info.txt` |
-
-Set `OWS_VAULT_DIR=/data/.hermes/wallets` before running OWS commands so vault files land in the persistent Hermes volume.
 
 ### Step 3 — On-chain validation (REQUIRED after any wallet operation)
 
