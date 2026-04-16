@@ -78,7 +78,9 @@ Everything else is configured through the web dashboard.
 
 ## Data Persistence
 
-All data lives on a Railway persistent volume at `/data`. Survives container restarts and redeploys.
+All data lives on a Railway persistent volume at `/data`. Survives container restarts, redeploys, and template updates.
+
+**Attach a volume at `/data` during deploy** — Railway will prompt for this automatically because the template declares `requiredMountPath = "/data"`. The volume is yours (not managed by the template), so future `Check for updates` pulls won't touch your data.
 
 ```
 /data/hermes/
