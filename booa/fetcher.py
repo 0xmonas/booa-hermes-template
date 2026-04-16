@@ -1,10 +1,16 @@
 """Fetch BOOA identity files from khora.fun API."""
 
+import os
+from pathlib import Path
+
 import httpx
 
 KHORA_API = "https://khora.fun/api/agent-files/360"
 KHORA_SKILLS_URL = "https://khora.fun/skills"
 COBBEE_SKILLS_URL = "https://cobbee.fun/skills"
+
+# Local skills bundled with the template (read from repo at build time).
+LOCAL_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 
 
 class TokenNotFound(Exception):
@@ -56,12 +62,30 @@ SKILL_URLS = {
 }
 
 
-async def fetch_skills() -> dict[str, dict[str, str]]:
-    """Fetch all pre-installed skills from Khôra and Cobbee."""
+def load_local_skills() -> dict[str, dict[str, str]]:
+    """Load skills bundled in the repo (skills/<name>/**). Independent of network."""
     results: dict[str, dict[str, str]] = {}
+    if not LOCAL_SKILLS_DIR.is_dir():
+        return results
+    for skill_dir in LOCAL_SKILLS_DIR.iterdir():
+        if not skill_dir.is_dir():
+            continue
+        files: dict[str, str] = {}
+        for file_path in skill_dir.rglob("*"):
+            if file_path.is_file():
+                rel = file_path.relative_to(skill_dir).as_posix()
+                files[rel] = file_path.read_text()
+        if files:
+            results[skill_dir.name] = files
+    return results
+
+
+async def fetch_skills() -> dict[str, dict[str, str]]:
+    """Fetch all pre-installed skills — remote (Khôra, Cobbee) merged with local bundled skills."""
+    results: dict[str, dict[str, str]] = load_local_skills()
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         for skill_name, files in SKILL_URLS.items():
-            results[skill_name] = {}
+            results.setdefault(skill_name, {})
             for path, url in files.items():
                 try:
                     resp = await client.get(url)
