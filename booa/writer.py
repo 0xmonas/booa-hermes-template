@@ -227,5 +227,25 @@ def mark_setup_complete(hermes_home: str):
 
 
 def is_setup_complete(hermes_home: str) -> bool:
-    """Check if onboarding wizard has been completed."""
-    return os.path.exists(os.path.join(hermes_home, ".setup-complete"))
+    """Check if onboarding wizard has been completed.
+
+    Checks the marker file first, but also falls back to detecting real setup
+    artifacts (config.yaml + SOUL.md + USER.md). This way a lost marker after
+    a Railway template update doesn't force the user through the wizard again
+    when their actual data is still on the volume.
+    """
+    if os.path.exists(os.path.join(hermes_home, ".setup-complete")):
+        return True
+    artifacts = [
+        os.path.join(hermes_home, "config.yaml"),
+        os.path.join(hermes_home, "SOUL.md"),
+        os.path.join(hermes_home, "memories", "USER.md"),
+    ]
+    if all(os.path.exists(p) for p in artifacts):
+        # Re-create the marker so the next check is fast.
+        try:
+            mark_setup_complete(hermes_home)
+        except OSError:
+            pass
+        return True
+    return False
