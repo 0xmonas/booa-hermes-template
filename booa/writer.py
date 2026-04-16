@@ -164,7 +164,9 @@ def write_config(hermes_home: str, provider: str, api_key: str, model: str,
         env_lines.append(f"OPENROUTER_API_KEY={api_key}")
     elif provider == "anthropic":
         env_lines.append(f"ANTHROPIC_API_KEY={api_key}")
-    elif provider == "openai":
+    elif provider == "deepseek":
+        env_lines.append(f"DEEPSEEK_API_KEY={api_key}")
+    elif provider == "custom":
         env_lines.append(f"OPENAI_API_KEY={api_key}")
     else:
         env_lines.append(f"OPENAI_API_KEY={api_key}")

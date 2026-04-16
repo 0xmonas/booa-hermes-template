@@ -207,7 +207,7 @@ async def wizard_step3(request: Request):
 
     wizard_data["provider"] = form.get("provider", "openrouter")
     wizard_data["api_key"] = form.get("api_key", "")
-    wizard_data["model"] = form.get("model", "nousresearch/hermes-3-llama-3.1-405b")
+    wizard_data["model"] = form.get("model", "nousresearch/hermes-4-70b")
 
     return RedirectResponse("/wizard?step=4", status_code=303)
 
