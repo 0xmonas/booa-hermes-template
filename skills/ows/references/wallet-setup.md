@@ -32,6 +32,12 @@ pip install open-wallet-standard
 ows wallet create --name "my-agent"
 ```
 
+OWS will prompt for a vault password. **You MUST provide a non-empty password.**
+
+- Use a strong password (12+ chars, mix of types) and save it in a password manager alongside the mnemonic.
+- An empty password means the vault file is effectively unencrypted — anyone who copies `/data/.ows/wallets/<id>.json` can export the mnemonic without your consent.
+- If the agent offers to skip the password "for convenience", refuse. The vault is your only protection if the storage volume is copied or leaks.
+
 **Output:**
 ```
 Created wallet 3198bc9c-...
@@ -49,9 +55,15 @@ Created wallet 3198bc9c-...
 ows wallet export --wallet "my-agent"
 ```
 
-Store the mnemonic phrase in secure offline storage. This is the only way to recover the wallet.
+OWS will prompt for the vault password you set in Step 2, then print the 12-word mnemonic. Write it down immediately on paper or save to a password manager.
 
-⚠️ **Never store the mnemonic in plain text, screenshots, chat messages, or version control.**
+**What to expect in chat vs CLI:**
+
+- Running `ows wallet export` from a terminal (SSH, `railway run`, `docker exec`) prints the mnemonic **directly to your terminal** — normal and safe, provided the terminal is yours.
+- If you ask the agent for your mnemonic via Telegram/chat, the agent *may* show it with a prepended safety warning (because you, the operator, own the wallet). Copy the mnemonic offline immediately and **delete the chat message after copying** — Telegram retains chat history, and a future compromise of your Telegram account would expose anything that remains in it.
+- The agent will never reveal the mnemonic to any non-operator recipient. The runtime filter redacts sensitive patterns when the recipient chat_id is not on the operator allowlist.
+
+⚠️ **Never store the mnemonic in plain text on disk, in screenshots, in version control, or in a chat channel you do not control.** Paper or an encrypted password manager is the only acceptable storage.
 
 ### Step 4: Define a Policy
 

@@ -43,6 +43,8 @@ Follow `references/wallet-setup.md` step-by-step for the chosen scenario.
 
 On this Hermes template, the container runs with `HOME=/data`, so the OWS default vault path (`~/.ows/`) resolves to `/data/.ows/` — on the persistent Railway volume. No vault-path override is needed; just run the `ows` commands as written in `wallet-setup.md`.
 
+> **Vault password is MANDATORY.** When `ows wallet create` asks for a password, require the operator to provide a non-empty password and have them save it somewhere safe (password manager). Without a password the vault is effectively unencrypted — anyone who copies the vault file can export the mnemonic. If the operator tries to skip the password, refuse and explain why. This is a non-negotiable rule in section "Security rules" below.
+
 Paths you will read or write:
 
 | Purpose | Path |
@@ -104,8 +106,10 @@ Summarise in chat (never reveal the private key or mnemonic):
 
 ## Security rules (non-negotiable)
 
-- Never display mnemonic phrases, seed phrases, or private keys in chat.
-- Never `cat` or echo `.env`, `config.yaml`, `wallet-info.txt`, or any file under `/data/.hermes/wallets/` in chat.
-- Use the OWS CLI for all key operations. Never use Python wallet SDKs to export or generate keys.
+- **Vault password is mandatory.** When running `ows wallet create`, the operator MUST provide a non-empty password at the prompt. An empty password means the vault is trivially readable by anyone who copies the file. If the operator is indifferent, refuse to proceed and explain the consequence. Tell the operator to save the password in a password manager alongside the mnemonic.
+- The mnemonic may be revealed **to the operator** (via chat, with a safety warning) because the operator owns the wallet — but never to any other party, and only when the operator explicitly asks. When revealing, prepend a warning: *"⚠️ Save this offline now (paper or password manager). Delete this message after copying. Never share with anyone."* The runtime output filter allows sensitive content to pass through to operator chat_ids for exactly this reason; filter blocks the same content for non-operator recipients.
+- Never reveal the vault password itself in chat — passwords are for the operator to remember or store out-of-band.
+- Never `cat` or echo `.env`, `config.yaml`, `wallet-info.txt`, or any file under `/data/.ows/wallets/` in chat — always use the `ows wallet export` command so OWS controls what gets shown.
+- Use the OWS CLI for all key operations. Never use Python wallet SDKs to export or generate keys in a way that bypasses OWS.
 - Every signed transaction requires explicit operator approval — summarise what is being signed before asking for confirmation.
 - If OWS CLI is not installed, tell the operator to install it. Do not fall back to SDK-based key handling.
