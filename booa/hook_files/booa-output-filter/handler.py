@@ -1,22 +1,6 @@
-"""BOOA output-filter hook handler.
-
-Runs on ``gateway:startup``. Monkey-patches every loaded
-``BasePlatformAdapter.send`` so that every outbound message passes through:
-
-  1. Nous's ``agent.redact.redact_sensitive_text`` (generic secrets)
-  2. BOOA's ``booa.output_filter.filter_output`` (crypto + private-file hashes)
-
-**Operator-aware mode.** The filter's purpose is to keep sensitive data away
-from anyone who is *not* the operator — not from the operator themselves.
-When a message is destined for a chat_id that matches the platform's
-allowed_users list (i.e. the operator), the filter logs the detection but
-**does not redact**; it prepends a safety warning so the operator knows to
-save the data offline and delete the chat message after copying. For any
-other recipient, full redaction applies.
-
-If any import fails, the hook logs and returns without crashing the gateway.
-Filtering failure must never block the main pipeline.
-"""
+"""gateway:startup hook — monkey-patch platform adapter send() to run
+Nous redact + booa.output_filter. Operator recipients get passthrough with
+a safety warning; everyone else gets redaction."""
 
 from __future__ import annotations
 
@@ -27,15 +11,10 @@ import sys
 log = logging.getLogger("booa.hook.output_filter")
 
 
-# Default paths inside the Hermes Template container. Overridden via env vars
-# for tests / custom deployments.
 _DEFAULT_BOOA_PATH = "/app"
 _DEFAULT_HERMES_HOME = "/data/hermes"
 _DEFAULT_INCIDENT_LOG = "/data/hermes/incidents.log"
 
-# Platform adapter modules we attempt to pre-import so that
-# ``BasePlatformAdapter.__subclasses__()`` returns them. Missing modules are
-# silently skipped — different Hermes builds ship different platforms.
 _PLATFORM_MODULES = [
     "gateway.platforms.telegram",
     "gateway.platforms.discord",
@@ -56,7 +35,6 @@ _PLATFORM_MODULES = [
 
 
 async def handle(event_type: str, context: dict) -> None:
-    """Hermes hook entry point."""
     if event_type != "gateway:startup":
         return
     try:
@@ -66,8 +44,6 @@ async def handle(event_type: str, context: dict) -> None:
 
 
 def _install_filter() -> None:
-    """Wrap every loaded platform adapter's ``send`` method."""
-    # Make booa package importable from within the hermes-agent subprocess.
     booa_path = os.environ.get("BOOA_PATH", _DEFAULT_BOOA_PATH)
     if booa_path not in sys.path:
         sys.path.insert(0, booa_path)
@@ -91,30 +67,17 @@ def _install_filter() -> None:
         return
 
     hermes_home = os.environ.get("HERMES_HOME", _DEFAULT_HERMES_HOME)
-    incident_log = os.environ.get(
-        "BOOA_INCIDENT_LOG",
-        _DEFAULT_INCIDENT_LOG,
-    )
+    incident_log = os.environ.get("BOOA_INCIDENT_LOG", _DEFAULT_INCIDENT_LOG)
 
     private_paths = [
         os.path.join(hermes_home, "memories", "USER.md"),
         os.path.join(hermes_home, "memories", "MEMORY.md"),
         os.path.join(hermes_home, ".env"),
-        # Registered operator secrets (optional file). When present, lines are
-        # hashed and matched against outbound content.
         os.path.join(hermes_home, "secrets.txt"),
     ]
     private_hashes = output_filter.compute_file_hashes(private_paths)
-
-    # Load operator allowlists per platform so we can distinguish operator-
-    # bound messages from stranger-bound messages. The filter passes sensitive
-    # content through to operators (with a safety warning) rather than
-    # redacting — the goal is to protect *non-operators*, not to hide data
-    # from Alice herself.
     operator_registry = _load_operator_registry(hermes_home)
 
-    # Force-import known platform modules so that BasePlatformAdapter has a
-    # populated __subclasses__ list.
     for mod in _PLATFORM_MODULES:
         try:
             __import__(mod)
@@ -145,15 +108,9 @@ def _install_filter() -> None:
 
 
 def _load_operator_registry(hermes_home: str) -> "dict[str, set[str]]":
-    """Return ``{platform: {chat_id, …}}`` from env vars + config.yaml.
-
-    Supports the standard Hermes env names (TELEGRAM_ALLOWED_USERS, etc.) plus
-    a fallback to config.yaml's ``gateway.platforms.<name>.allowed_users`` list.
-    Missing or unparseable sources are silently skipped.
-    """
+    """Return {platform: {chat_id, …}} from env vars + config.yaml + pairing files."""
     registry: dict[str, set[str]] = {}
 
-    # Env var pattern: <PLATFORM>_ALLOWED_USERS = "id1,id2,id3"
     env_sources = {
         "telegram": "TELEGRAM_ALLOWED_USERS",
         "discord": "DISCORD_ALLOWED_USERS",
@@ -169,11 +126,10 @@ def _load_operator_registry(hermes_home: str) -> "dict[str, set[str]]":
             if ids:
                 registry[platform] = ids
 
-    # Fallback: config.yaml (some templates declare allowed_users inline)
     config_path = os.path.join(hermes_home, "config.yaml")
     if os.path.isfile(config_path):
         try:
-            import yaml  # hermes-agent ships pyyaml
+            import yaml
             with open(config_path, "r", encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
             platforms = (cfg.get("gateway") or {}).get("platforms") or {}
@@ -190,11 +146,6 @@ def _load_operator_registry(hermes_home: str) -> "dict[str, set[str]]":
         except Exception as exc:
             log.debug("[booa-filter] could not parse config.yaml: %s", exc)
 
-    # Pairing files (Hermes's native approved-users store). One JSON per
-    # platform at gateway/platforms/pairing/<platform>-approved.json with the
-    # shape ``{"<user_id>": {"user_name": ..., "approved_at": ...}, ...}``.
-    # This is the authoritative allowlist for platforms like Telegram where
-    # users are approved via the dashboard pairing flow.
     pairing_dir = os.path.join(hermes_home, "platforms", "pairing")
     if os.path.isdir(pairing_dir):
         import json
@@ -224,7 +175,6 @@ def _is_operator(platform: str, chat_id, operator_registry: "dict[str, set[str]]
 
 
 def _all_subclasses(cls):
-    """Recursive subclass iteration (BFS avoids duplicates)."""
     seen = set()
     queue = list(cls.__subclasses__())
     while queue:
@@ -245,7 +195,6 @@ def _wrap_send(
     incident_log,
     operator_registry,
 ) -> None:
-    """Replace cls.send with an operator-aware filtered version. Idempotent."""
     original_send = cls.send
 
     async def wrapped_send(
@@ -263,9 +212,6 @@ def _wrap_send(
         if filtered:
             try:
                 if is_operator:
-                    # Operator path: show the data (Alice owns it) but detect
-                    # and prepend a safety warning so she knows to save offline
-                    # and delete the message after copying.
                     hits = output_filter_module.scan(
                         filtered,
                         private_file_hashes=private_hashes,
@@ -284,7 +230,6 @@ def _wrap_send(
                             ),
                         )
                 else:
-                    # Non-operator path: full redaction chain.
                     if redact_sensitive_text is not None:
                         filtered = redact_sensitive_text(filtered)
                     result = output_filter_module.filter_output(

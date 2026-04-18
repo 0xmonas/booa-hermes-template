@@ -18,12 +18,6 @@ def ensure_dirs(hermes_home: str):
 
 
 def install_output_filter_hook(hermes_home: str):
-    """Install the booa-output-filter hook into HERMES_HOME/hooks/.
-
-    The hook fires on ``gateway:startup`` and monkey-patches every platform
-    adapter's ``send`` method so outbound messages pass through Nous redact
-    and the BOOA output filter before delivery. Idempotent.
-    """
     src = os.path.join(os.path.dirname(__file__), "hook_files", "booa-output-filter")
     dst = os.path.join(hermes_home, "hooks", "booa-output-filter")
     if not os.path.isdir(src):
@@ -37,17 +31,8 @@ def install_output_filter_hook(hermes_home: str):
 
 
 def migrate_pairing_files(hermes_home: str):
-    """Copy approved pairings from the old Hermes layout to the new one.
-
-    Older hermes-agent versions stored pairing files under
-    ``<HERMES_HOME>/platforms/pairing/``; current versions use
-    ``<HERMES_HOME>/pairing/``. Existing deployments that were paired under
-    the old layout lose operator recognition when the runtime upgrades,
-    because the new code only reads the new path. This function copies any
-    ``*-approved.json`` and ``*-pending.json`` files that exist in the old
-    location but not the new one. It never overwrites, so running it after
-    migration is safe. Missing source dir is silently skipped.
-    """
+    """Copy approved/pending pairings from platforms/pairing/ to pairing/.
+    Old hermes-agent path → new one. Never overwrites."""
     old = os.path.join(hermes_home, "platforms", "pairing")
     new = os.path.join(hermes_home, "pairing")
     if not os.path.isdir(old):
@@ -206,22 +191,11 @@ def write_config(hermes_home: str, provider: str, api_key: str, model: str,
         if telegram_users:
             config["gateway"]["platforms"]["telegram"]["allowed_users"] = telegram_users
 
-    # Write .env for API key
     env_path = os.path.join(hermes_home, ".env")
-    env_lines = []
-    if provider == "openrouter":
-        env_lines.append(f"OPENROUTER_API_KEY={api_key}")
-        env_lines.append("HERMES_INFERENCE_PROVIDER=openrouter")
-    elif provider == "anthropic":
-        env_lines.append(f"ANTHROPIC_API_KEY={api_key}")
-        env_lines.append("HERMES_INFERENCE_PROVIDER=anthropic")
-    elif provider == "deepseek":
-        env_lines.append(f"DEEPSEEK_API_KEY={api_key}")
-        env_lines.append("HERMES_INFERENCE_PROVIDER=deepseek")
-    elif provider == "custom":
-        env_lines.append(f"OPENAI_API_KEY={api_key}")
-    else:
-        env_lines.append(f"OPENAI_API_KEY={api_key}")
+    env_lines = [
+        f"OPENROUTER_API_KEY={api_key}",
+        "HERMES_INFERENCE_PROVIDER=openrouter",
+    ]
 
     if telegram_token:
         env_lines.append(f"TELEGRAM_BOT_TOKEN={telegram_token}")
@@ -276,20 +250,7 @@ def mark_setup_complete(hermes_home: str):
 
 
 def is_setup_complete(hermes_home: str) -> bool:
-    """Check if onboarding wizard has been completed.
-
-    Fast path: the ``.setup-complete`` marker. But the marker can go missing
-    independently of the actual data — for example after a Hermes runtime
-    upgrade or a volume snapshot restore that preserves the hermes tree but
-    drops the marker. In that case we fall back to detecting real setup
-    artifacts (config.yaml + SOUL.md + USER.md); if all three exist the
-    deployment is considered set up and we recreate the marker so subsequent
-    checks are cheap.
-
-    This mirrors the config-existence check used by praveen-ks-2001's
-    hermes-agent-template, which avoids a marker file entirely. We keep the
-    marker as a cache but no longer treat it as authoritative.
-    """
+    """Marker first; fall back to config+SOUL+USER artifacts if marker is missing."""
     if os.path.exists(os.path.join(hermes_home, ".setup-complete")):
         return True
     artifacts = [

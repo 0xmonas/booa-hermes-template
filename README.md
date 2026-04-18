@@ -39,7 +39,7 @@ Open your app URL. After login (`admin` / your `ADMIN_PASSWORD`) the wizard open
 
 1. **Token ID** — Enter your BOOA token ID. Identity fetched from the blockchain.
 2. **USER.md** — Tell your agent about yourself. What to do, spending limits, language.
-3. **Provider** — Pick an AI provider. OpenRouter has a free tier.
+3. **OpenRouter API key** — Sign up for free at [openrouter.ai](https://openrouter.ai) and paste your key. OpenRouter is the one supported provider in the wizard because the same key covers your agent's main model and Hermes's auxiliary tasks (summarization, compression) — no "No auxiliary LLM configured" warnings. Pick from free tiers (e.g. `openai/gpt-oss-120b:free`) or paid models (Claude, GPT-5, Gemini, DeepSeek, Llama, Mistral). Power users can still override to Anthropic / custom endpoints via Railway Variables after setup.
 4. **Telegram** — Create a bot via @BotFather, paste the token. Done.
 
 Your agent starts automatically. Message it on Telegram.

@@ -332,30 +332,17 @@ async def settings_page(request: Request):
     return render(request, "settings.html", {"data": wizard_data})
 
 
-# Hermes moved pairing storage from platforms/pairing/ to pairing/ in a recent
-# upstream version. The runtime writes pending/approved files to whichever path
-# its installed version expects; we resolve at read time so the dashboard
-# keeps working for both layouts during the transition.
+# Hermes moved pairing from platforms/pairing/ to pairing/ upstream.
 _PAIRING_DIR_NEW = Path(HERMES_HOME) / "pairing"
 _PAIRING_DIR_OLD = Path(HERMES_HOME) / "platforms" / "pairing"
 
 
 class _PairingDir:
-    """Proxy that re-resolves on every access.
-
-    Prefers the new path if it has any pairing JSON; otherwise falls back to
-    the legacy path. This handles: (a) brand-new deployments where only the
-    new path will ever be written to, (b) legacy deployments where only the
-    old path has data, (c) mid-migration deployments where both exist and
-    the new one is authoritative.
-    """
-
     def _resolve(self) -> Path:
         if _PAIRING_DIR_NEW.exists() and any(_PAIRING_DIR_NEW.glob("*.json")):
             return _PAIRING_DIR_NEW
         if _PAIRING_DIR_OLD.exists() and any(_PAIRING_DIR_OLD.glob("*.json")):
             return _PAIRING_DIR_OLD
-        # Neither has files yet — default to the new path so writes go there.
         return _PAIRING_DIR_NEW
 
     def exists(self) -> bool:
@@ -596,8 +583,6 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app):
-    # Migrate pairing files from the old Hermes layout (platforms/pairing → pairing)
-    # before the setup check so existing operator approvals are honored.
     migrate_pairing_files(HERMES_HOME)
     if is_setup_complete(HERMES_HOME):
         install_output_filter_hook(HERMES_HOME)
