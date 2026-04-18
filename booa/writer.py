@@ -36,6 +36,35 @@ def install_output_filter_hook(hermes_home: str):
             shutil.copyfile(src_file, dst_file)
 
 
+def migrate_pairing_files(hermes_home: str):
+    """Copy approved pairings from the old Hermes layout to the new one.
+
+    Older hermes-agent versions stored pairing files under
+    ``<HERMES_HOME>/platforms/pairing/``; current versions use
+    ``<HERMES_HOME>/pairing/``. Existing deployments that were paired under
+    the old layout lose operator recognition when the runtime upgrades,
+    because the new code only reads the new path. This function copies any
+    ``*-approved.json`` and ``*-pending.json`` files that exist in the old
+    location but not the new one. It never overwrites, so running it after
+    migration is safe. Missing source dir is silently skipped.
+    """
+    old = os.path.join(hermes_home, "platforms", "pairing")
+    new = os.path.join(hermes_home, "pairing")
+    if not os.path.isdir(old):
+        return
+    os.makedirs(new, exist_ok=True)
+    try:
+        for fname in os.listdir(old):
+            if not (fname.endswith("-approved.json") or fname.endswith("-pending.json")):
+                continue
+            src_file = os.path.join(old, fname)
+            dst_file = os.path.join(new, fname)
+            if os.path.isfile(src_file) and not os.path.isfile(dst_file):
+                shutil.copy2(src_file, dst_file)
+    except OSError:
+        pass
+
+
 def write_soul(hermes_home: str, soul_md: str):
     """Write SOUL.md — slot #1 in Hermes system prompt. Pure agent personality, no injections."""
     with open(os.path.join(hermes_home, "SOUL.md"), "w") as f:
@@ -247,5 +276,31 @@ def mark_setup_complete(hermes_home: str):
 
 
 def is_setup_complete(hermes_home: str) -> bool:
-    """Check if onboarding wizard has been completed."""
-    return os.path.exists(os.path.join(hermes_home, ".setup-complete"))
+    """Check if onboarding wizard has been completed.
+
+    Fast path: the ``.setup-complete`` marker. But the marker can go missing
+    independently of the actual data — for example after a Hermes runtime
+    upgrade or a volume snapshot restore that preserves the hermes tree but
+    drops the marker. In that case we fall back to detecting real setup
+    artifacts (config.yaml + SOUL.md + USER.md); if all three exist the
+    deployment is considered set up and we recreate the marker so subsequent
+    checks are cheap.
+
+    This mirrors the config-existence check used by praveen-ks-2001's
+    hermes-agent-template, which avoids a marker file entirely. We keep the
+    marker as a cache but no longer treat it as authoritative.
+    """
+    if os.path.exists(os.path.join(hermes_home, ".setup-complete")):
+        return True
+    artifacts = [
+        os.path.join(hermes_home, "config.yaml"),
+        os.path.join(hermes_home, "SOUL.md"),
+        os.path.join(hermes_home, "memories", "USER.md"),
+    ]
+    if all(os.path.exists(p) for p in artifacts):
+        try:
+            mark_setup_complete(hermes_home)
+        except OSError:
+            pass
+        return True
+    return False

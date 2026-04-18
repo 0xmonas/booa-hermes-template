@@ -22,7 +22,7 @@ from booa.writer import (
     ensure_dirs, write_soul, write_identity, write_avatar, write_agent_json,
     write_user_md, write_seed_memory, write_skills, write_config,
     generate_user_md, mark_setup_complete, is_setup_complete,
-    write_security_rules, install_output_filter_hook,
+    write_security_rules, install_output_filter_hook, migrate_pairing_files,
 )
 from booa.gateway import GatewayManager
 
@@ -560,6 +560,9 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app):
+    # Migrate pairing files from the old Hermes layout (platforms/pairing → pairing)
+    # before the setup check so existing operator approvals are honored.
+    migrate_pairing_files(HERMES_HOME)
     if is_setup_complete(HERMES_HOME):
         install_output_filter_hook(HERMES_HOME)
         print("[khora] Setup complete — auto-starting gateway", flush=True)
