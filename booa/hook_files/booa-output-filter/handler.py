@@ -181,6 +181,17 @@ def _wrap_send(
                     private_file_hashes=private_hashes,
                 )
                 filtered = result.text
+                if result.hits:
+                    log.warning(
+                        "[booa-filter] %d hit(s) on %s: %s",
+                        len(result.hits),
+                        channel,
+                        ", ".join(
+                            f"{h.pattern_type}"
+                            + (f"/{h.subtype}" if h.subtype else "")
+                            for h in result.hits
+                        ),
+                    )
             except Exception as exc:
                 log.debug("[booa-filter] booa filter failed: %s", exc)
 
