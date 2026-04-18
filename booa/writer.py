@@ -1,6 +1,7 @@
 """Write Hermes identity files to HERMES_HOME."""
 
 import os
+import shutil
 import yaml
 
 TEMPLATE_VERSION = "1.0.0"
@@ -8,12 +9,31 @@ TEMPLATE_VERSION = "1.0.0"
 
 def ensure_dirs(hermes_home: str):
     """Create Hermes directory structure and write version marker."""
-    for d in ["memories", "skills", "sessions", "context", "workspace", "cron"]:
+    for d in ["memories", "skills", "sessions", "context", "workspace", "cron", "hooks"]:
         os.makedirs(os.path.join(hermes_home, d), exist_ok=True)
 
     version_path = os.path.join(hermes_home, ".template-version")
     with open(version_path, "w") as f:
         f.write(TEMPLATE_VERSION)
+
+
+def install_output_filter_hook(hermes_home: str):
+    """Install the booa-output-filter hook into HERMES_HOME/hooks/.
+
+    The hook fires on ``gateway:startup`` and monkey-patches every platform
+    adapter's ``send`` method so outbound messages pass through Nous redact
+    and the BOOA output filter before delivery. Idempotent.
+    """
+    src = os.path.join(os.path.dirname(__file__), "hook_files", "booa-output-filter")
+    dst = os.path.join(hermes_home, "hooks", "booa-output-filter")
+    if not os.path.isdir(src):
+        return
+    os.makedirs(dst, exist_ok=True)
+    for name in ("HOOK.yaml", "handler.py"):
+        src_file = os.path.join(src, name)
+        dst_file = os.path.join(dst, name)
+        if os.path.isfile(src_file):
+            shutil.copyfile(src_file, dst_file)
 
 
 def write_soul(hermes_home: str, soul_md: str):

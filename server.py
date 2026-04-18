@@ -22,7 +22,7 @@ from booa.writer import (
     ensure_dirs, write_soul, write_identity, write_avatar, write_agent_json,
     write_user_md, write_seed_memory, write_skills, write_config,
     generate_user_md, mark_setup_complete, is_setup_complete,
-    write_security_rules,
+    write_security_rules, install_output_filter_hook,
 )
 from booa.gateway import GatewayManager
 
@@ -163,6 +163,7 @@ async def wizard_step1(request: Request):
         write_seed_memory(HERMES_HOME, booa_data)
         write_skills(HERMES_HOME, skills)
         write_security_rules(HERMES_HOME)
+        install_output_filter_hook(HERMES_HOME)
 
         wizard_data.update(booa_data)
         wizard_data["skills_installed"] = list(skills.keys())
@@ -560,6 +561,7 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app):
     if is_setup_complete(HERMES_HOME):
+        install_output_filter_hook(HERMES_HOME)
         print("[khora] Setup complete — auto-starting gateway", flush=True)
         await gateway.start()
     yield

@@ -1,0 +1,7 @@
+name: booa-output-filter
+description: >
+  Run Nous redact + BOOA-specific output filter on every platform message
+  before it reaches the user. Complements agent.redact with BIP39, WIF, OWS
+  API keys, labeled 0x+64hex, and private-file hash matching.
+events:
+  - gateway:startup
