@@ -32,6 +32,24 @@ VALID_BIP39_12 = (
     "abandon ability able about above absent absorb abstract absurd abuse access accident"
 )
 
+# 15-word phrase (each word is in the BIP39 list — valid BIP39 length)
+VALID_BIP39_15 = (
+    "abandon ability able about above absent absorb abstract absurd abuse access accident "
+    "account accuse achieve"
+)
+
+# 18-word phrase
+VALID_BIP39_18 = (
+    "abandon ability able about above absent absorb abstract absurd abuse access accident "
+    "account accuse achieve acid acoustic acquire"
+)
+
+# 21-word phrase
+VALID_BIP39_21 = (
+    "abandon ability able about above absent absorb abstract absurd abuse access accident "
+    "account accuse achieve acid acoustic acquire across act action"
+)
+
 # 24-word phrase (each word is in the BIP39 list)
 VALID_BIP39_24 = (
     "abandon ability able about above absent absorb abstract absurd abuse access accident "
@@ -73,15 +91,35 @@ class TestScanBip39(unittest.TestCase):
         self.assertEqual(len(bip39), 1)
         self.assertEqual(bip39[0].subtype, "24-word")
 
+    def test_detects_valid_15_word(self) -> None:
+        hits = [h for h in of.scan(VALID_BIP39_15) if h.pattern_type == "bip39"]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0].subtype, "15-word")
+
+    def test_detects_valid_18_word(self) -> None:
+        hits = [h for h in of.scan(VALID_BIP39_18) if h.pattern_type == "bip39"]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0].subtype, "18-word")
+
+    def test_detects_valid_21_word(self) -> None:
+        hits = [h for h in of.scan(VALID_BIP39_21) if h.pattern_type == "bip39"]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0].subtype, "21-word")
+
     def test_ignores_non_bip39_english(self) -> None:
         hits = of.scan(FAKE_ENGLISH_12)
         self.assertEqual([h for h in hits if h.pattern_type == "bip39"], [])
 
-    def test_ignores_11_or_13_word_sequences(self) -> None:
-        eleven = " ".join(VALID_BIP39_12.split()[:11])
-        thirteen = VALID_BIP39_12 + " access"
-        self.assertEqual([h for h in of.scan(eleven) if h.pattern_type == "bip39"], [])
-        self.assertEqual([h for h in of.scan(thirteen) if h.pattern_type == "bip39"], [])
+    def test_ignores_invalid_lengths(self) -> None:
+        """BIP39 only supports 12/15/18/21/24 words; others must be ignored."""
+        words_24 = VALID_BIP39_24.split()
+        for invalid_len in (11, 13, 14, 16, 17, 19, 20, 22, 23):
+            phrase = " ".join(words_24[:invalid_len])
+            hits = [h for h in of.scan(phrase) if h.pattern_type == "bip39"]
+            self.assertEqual(
+                hits, [],
+                msg=f"{invalid_len}-word sequence should not match BIP39",
+            )
 
     def test_case_insensitive(self) -> None:
         upper = VALID_BIP39_12.upper()
@@ -294,6 +332,35 @@ class TestFilterOutput(unittest.TestCase):
             )
             # Filter should still succeed, logging failure is silent
             self.assertTrue(result.was_filtered)
+
+
+class TestOperatorWarning(unittest.TestCase):
+    """operator_warning() produces a prefix describing detected sensitive types.
+
+    Used by the hook's operator-bypass path: the mnemonic/key is *not* redacted
+    for the operator, but the message is prepended with a warning so Alice saves
+    it offline and deletes the chat message.
+    """
+
+    def test_empty_hits_returns_empty(self) -> None:
+        self.assertEqual(of.operator_warning([]), "")
+
+    def test_single_bip39_hit_labels_type(self) -> None:
+        hits = of.scan(VALID_BIP39_12)
+        warning = of.operator_warning(hits)
+        self.assertIn("SENSITIVE DATA", warning)
+        self.assertIn("bip39/12-word", warning)
+        self.assertIn("save it offline", warning.lower())
+        self.assertIn("delete", warning.lower())
+
+    def test_mixed_hits_lists_all_types(self) -> None:
+        # Period terminates the BIP39 word sequence so the following text
+        # (API key label) doesn't accidentally extend the match past 12 words.
+        text = f"{VALID_BIP39_12}.\n\n{OWS_KEY}"
+        hits = of.scan(text)
+        warning = of.operator_warning(hits)
+        self.assertIn("bip39/12-word", warning)
+        self.assertIn("api_key/ows", warning)
 
 
 class TestFalsePositives(unittest.TestCase):

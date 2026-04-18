@@ -58,7 +58,11 @@ _LABELED_HEX = re.compile(
     r"0x[a-fA-F0-9]{64}\b"
 )
 
+# BIP39 supports 12, 15, 18, 21, or 24 words. The candidate regex matches any
+# span of 12-24 consecutive lowercase words of valid length; _scan_bip39 then
+# enforces the exact length set and validates each word against the wordlist.
 _BIP39_CANDIDATE = re.compile(r"\b(?:[a-z]{3,8}\s+){11,23}[a-z]{3,8}\b", re.IGNORECASE)
+_BIP39_VALID_LENGTHS = frozenset({12, 15, 18, 21, 24})
 
 _MIN_PRIVATE_LINE_LEN = 10
 
@@ -112,6 +116,26 @@ class FilterResult:
     @property
     def was_filtered(self) -> bool:
         return len(self.hits) > 0
+
+
+_OPERATOR_WARNING_TEMPLATE = (
+    "⚠️  SENSITIVE DATA BELOW — save it offline NOW (paper or password manager)\n"
+    "⚠️  Do not keep this message in your chat history — delete after copying\n"
+    "⚠️  Never share with anyone, human or agent\n"
+    "\n"
+)
+
+
+def operator_warning(hits: list[Hit]) -> str:
+    """Return a human-readable warning prefix describing what sensitive content follows.
+
+    Used when bypassing redaction for a verified operator — the raw secret is shown
+    but prepended with a warning so the operator handles it carefully.
+    """
+    if not hits:
+        return ""
+    types = sorted({h.pattern_type + (f"/{h.subtype}" if h.subtype else "") for h in hits})
+    return _OPERATOR_WARNING_TEMPLATE + f"Detected: {', '.join(types)}\n\n"
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +274,7 @@ def _scan_bip39(text: str) -> list[Hit]:
     hits: list[Hit] = []
     for m in _BIP39_CANDIDATE.finditer(text):
         words = [w.lower() for w in m.group().split()]
-        if len(words) not in (12, 24):
+        if len(words) not in _BIP39_VALID_LENGTHS:
             continue
         if all(w in _BIP39_WORDLIST for w in words):
             hits.append(Hit(
