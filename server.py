@@ -332,7 +332,43 @@ async def settings_page(request: Request):
     return render(request, "settings.html", {"data": wizard_data})
 
 
-PAIRING_DIR = Path(HERMES_HOME) / "platforms" / "pairing"
+# Hermes moved pairing storage from platforms/pairing/ to pairing/ in a recent
+# upstream version. The runtime writes pending/approved files to whichever path
+# its installed version expects; we resolve at read time so the dashboard
+# keeps working for both layouts during the transition.
+_PAIRING_DIR_NEW = Path(HERMES_HOME) / "pairing"
+_PAIRING_DIR_OLD = Path(HERMES_HOME) / "platforms" / "pairing"
+
+
+class _PairingDir:
+    """Proxy that re-resolves on every access.
+
+    Prefers the new path if it has any pairing JSON; otherwise falls back to
+    the legacy path. This handles: (a) brand-new deployments where only the
+    new path will ever be written to, (b) legacy deployments where only the
+    old path has data, (c) mid-migration deployments where both exist and
+    the new one is authoritative.
+    """
+
+    def _resolve(self) -> Path:
+        if _PAIRING_DIR_NEW.exists() and any(_PAIRING_DIR_NEW.glob("*.json")):
+            return _PAIRING_DIR_NEW
+        if _PAIRING_DIR_OLD.exists() and any(_PAIRING_DIR_OLD.glob("*.json")):
+            return _PAIRING_DIR_OLD
+        # Neither has files yet — default to the new path so writes go there.
+        return _PAIRING_DIR_NEW
+
+    def exists(self) -> bool:
+        return self._resolve().exists()
+
+    def glob(self, pattern: str):
+        return self._resolve().glob(pattern)
+
+    def __truediv__(self, other: str) -> Path:
+        return self._resolve() / other
+
+
+PAIRING_DIR = _PairingDir()
 PAIRING_TTL = 3600
 
 
