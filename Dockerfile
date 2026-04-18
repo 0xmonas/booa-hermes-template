@@ -13,6 +13,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+RUN chmod +x /app/start.sh
 
 ENV HERMES_HOME=/data/hermes
 ENV HOME=/data
@@ -20,4 +21,4 @@ ENV PORT=8080
 
 EXPOSE 8080
 
-CMD ["python", "server.py"]
+CMD ["/app/start.sh"]
