@@ -20,7 +20,22 @@ Your agent comes with:
 - **Khôra skill** — agent setup, wallet config, ERC-8004 ownership
 - **Cobbee skill** — creator platform, x402 payments
 
-## Setup (4 Steps)
+## Setup
+
+### 1. Attach a volume (one-time, ~10 seconds)
+
+After clicking Deploy, Railway creates the service but **does not** attach persistent storage by default — this is intentional so that template updates don't reset your data. You need to add a volume yourself, once:
+
+1. Open your new service in Railway → **Settings** → **Volumes**
+2. Click **Add Volume**
+3. Mount path: `/data`
+4. Save — the service will restart automatically
+
+Without this, your agent's memory, pairing, and wallet live only in the container's ephemeral filesystem and will disappear on redeploys.
+
+### 2. Run the wizard (4 steps)
+
+Open your app URL. After login (`admin` / your `ADMIN_PASSWORD`) the wizard opens:
 
 1. **Token ID** — Enter your BOOA token ID. Identity fetched from the blockchain.
 2. **USER.md** — Tell your agent about yourself. What to do, spending limits, language.
@@ -28,6 +43,10 @@ Your agent comes with:
 4. **Telegram** — Create a bot via @BotFather, paste the token. Done.
 
 Your agent starts automatically. Message it on Telegram.
+
+### Updating the template
+
+When Railway shows "Check for updates", accepting will rebuild the service but **leave your volume untouched** — SOUL.md, memory, sessions, OWS vault, Telegram pairing all survive. The startup script re-creates the expected directory structure idempotently, so no manual migration is needed.
 
 ## After Setup
 

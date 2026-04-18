@@ -2,11 +2,20 @@
 builder = "DOCKERFILE"
 
 [deploy]
-startCommand = "python server.py"
+startCommand = "/app/start.sh"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 
-[[volumes]]
-mountPath = "/data"
+# NOTE: no [[volumes]] declaration here.
+#
+# Railway treats volumes declared in a template as part of the template
+# definition, so "Check for updates" can re-provision them and wipe user data.
+# Following the pattern used by praveen-ks-2001/hermes-agent-template, we
+# instead require the operator to attach a volume manually at /data (one-time,
+# via Service Settings → Volumes). That volume then lives as an independent
+# Railway asset and survives template updates.
+#
+# start.sh creates the directory structure idempotently, so the container
+# boots cleanly whether the volume is fresh, pre-populated, or absent.
