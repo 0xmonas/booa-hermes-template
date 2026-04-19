@@ -101,11 +101,11 @@
   </div>
   <div id="wallet-challenge-box" style="display:none;" class="mt-2">
     <div class="info-box text-xs">
-      Give this challenge to your agent and ask it to sign with OWS.
-      Then paste the signature below and click <strong>Submit</strong>.
+      <strong>1.</strong> Copy the exact command below and give it to your agent on Telegram. The agent must use OWS (not any other signer) — a random wallet will be rejected.<br>
+      <strong>2.</strong> Paste the returned <code>0x...</code> signature into the input and click Submit.
     </div>
-    <textarea id="wallet-challenge-text" readonly class="mt-1" style="width:100%;height:120px;font-family:monospace;font-size:11px;"></textarea>
-    <input id="wallet-signature-input" placeholder="0x…signature" class="mt-1" style="width:100%;font-family:monospace;font-size:11px;">
+    <textarea id="wallet-ows-command" readonly class="mt-1" style="width:100%;height:140px;font-family:monospace;font-size:11px;"></textarea>
+    <input id="wallet-signature-input" placeholder="0x…signature returned by the agent" class="mt-1" style="width:100%;font-family:monospace;font-size:11px;">
     <button onclick="submitWalletSignature()" class="btn-sm mt-1">Submit signature</button>
     <span id="wallet-verify-result" class="text-xs text-muted ml-2"></span>
   </div>
@@ -261,7 +261,10 @@ async function startWalletVerify() {
     return;
   }
   const data = await res.json();
-  document.getElementById('wallet-challenge-text').value = data.message;
+  const escaped = data.message.replace(/"/g, '\\"');
+  const walletName = data.wallet_name || 'my-agent';
+  const cmd = `OWS_PASSPHRASE=$OWS_API_KEY ows sign message \\\n  --wallet ${walletName} --chain shape \\\n  --message "${escaped}"`;
+  document.getElementById('wallet-ows-command').value = cmd;
   document.getElementById('wallet-signature-input').value = '';
   document.getElementById('wallet-verify-result').textContent = '';
   document.getElementById('wallet-challenge-box').style.display = '';

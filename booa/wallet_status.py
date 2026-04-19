@@ -124,30 +124,46 @@ def _render_status_md(state: WalletState) -> str:
 
 
 def _read_local_wallet(hermes_home: str) -> Optional[str]:
+    info = _read_local_wallet_info(hermes_home)
+    return info["address"] if info else None
+
+
+def _read_local_wallet_info(hermes_home: str) -> Optional[dict]:
     wallet_info = "/data/.agent/wallet-info.txt"
+    address: Optional[str] = None
+    name: Optional[str] = None
     if os.path.isfile(wallet_info):
         try:
             with open(wallet_info, "r", encoding="utf-8") as f:
                 for line in f:
                     if "EVM Address:" in line:
-                        return line.split("EVM Address:", 1)[1].strip()
+                        address = line.split("EVM Address:", 1)[1].strip()
+                    elif "Wallet Name:" in line or "Name:" in line:
+                        name = line.split(":", 1)[1].strip()
         except OSError:
             pass
 
     ows_dir = "/data/.ows/wallets"
     if os.path.isdir(ows_dir):
         try:
-            for name in os.listdir(ows_dir):
-                if not name.endswith(".json"):
+            for entry in os.listdir(ows_dir):
+                if not entry.endswith(".json"):
                     continue
-                with open(os.path.join(ows_dir, name), "r", encoding="utf-8") as f:
+                with open(os.path.join(ows_dir, entry), "r", encoding="utf-8") as f:
                     data = json.load(f)
                 for acc in data.get("accounts", []):
                     if acc.get("chain_id", "").startswith("eip155:"):
-                        return acc.get("address")
+                        address = acc.get("address")
+                        break
+                if data.get("name"):
+                    name = data["name"]
+                if address:
+                    break
         except (OSError, ValueError):
             pass
-    return None
+    if not address:
+        return None
+    return {"address": address, "name": name}
 
 
 def fetch_khora_registry(chain_id: int, token_id: int, timeout: float = 8.0) -> Optional[dict]:
