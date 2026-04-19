@@ -594,12 +594,10 @@ async def wallet_challenge_create(request: Request):
         return JSONResponse({"error": "setup incomplete"}, status_code=400)
     token_id, chain_id = tc
     info = wallet_status._read_local_wallet_info(HERMES_HOME)
-    if not info:
-        return JSONResponse({"error": "no local wallet; run /ows first"}, status_code=400)
-    payload = wallet_status.create_challenge(HERMES_HOME, chain_id, token_id, info["address"])
+    payload = wallet_status.create_challenge(HERMES_HOME, chain_id, token_id)
     return JSONResponse({
-        "wallet_address": info["address"],
-        "wallet_name": info.get("name") or "my-agent",
+        "suggested_wallet": info["address"] if info else None,
+        "suggested_name": (info.get("name") if info else None) or "my-agent",
         **payload,
     })
 

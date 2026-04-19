@@ -30,6 +30,7 @@ class WalletState:
     state: str
     updated_at: float
     agent_wallet: Optional[str] = None
+    verified_wallet: Optional[str] = None
     nft_owner: Optional[str] = None
     nft_verified: Optional[bool] = None
     registered_by: Optional[str] = None
@@ -181,6 +182,7 @@ def compute_state(hermes_home: str, chain_id: int, token_id: int) -> WalletState
     local_wallet = _read_local_wallet(hermes_home)
     previous = read_state(hermes_home)
     prev_signed_nonce = previous.last_signed_nonce if previous else None
+    prev_verified = previous.verified_wallet if previous else None
 
     registry = fetch_khora_registry(chain_id, token_id)
     now = time.time()
@@ -190,6 +192,7 @@ def compute_state(hermes_home: str, chain_id: int, token_id: int) -> WalletState
             state="unknown",
             updated_at=now,
             agent_wallet=local_wallet,
+            verified_wallet=prev_verified,
             last_signed_nonce=prev_signed_nonce,
         )
 
@@ -204,6 +207,7 @@ def compute_state(hermes_home: str, chain_id: int, token_id: int) -> WalletState
             state="orphan",
             updated_at=now,
             agent_wallet=local_wallet,
+            verified_wallet=prev_verified,
             nft_owner=nft_owner,
             nft_verified=False,
             registered_by=registered_by,
@@ -215,13 +219,14 @@ def compute_state(hermes_home: str, chain_id: int, token_id: int) -> WalletState
         return WalletState(
             state="no-wallet",
             updated_at=now,
+            verified_wallet=prev_verified,
             nft_owner=nft_owner,
             nft_verified=verified,
             registered_by=registered_by,
             agent_id=agent_id,
         )
 
-    if not prev_signed_nonce:
+    if not prev_verified:
         return WalletState(
             state="unverified",
             updated_at=now,
@@ -236,11 +241,12 @@ def compute_state(hermes_home: str, chain_id: int, token_id: int) -> WalletState
         (registered_by or "").lower(),
         (nft_owner or "").lower(),
     ]
-    if local_wallet.lower() in on_chain_wallets:
+    if prev_verified.lower() in on_chain_wallets:
         return WalletState(
             state="linked",
             updated_at=now,
             agent_wallet=local_wallet,
+            verified_wallet=prev_verified,
             nft_owner=nft_owner,
             nft_verified=verified,
             registered_by=registered_by,
@@ -252,6 +258,7 @@ def compute_state(hermes_home: str, chain_id: int, token_id: int) -> WalletState
         state="verified",
         updated_at=now,
         agent_wallet=local_wallet,
+        verified_wallet=prev_verified,
         nft_owner=nft_owner,
         nft_verified=verified,
         registered_by=registered_by,
@@ -286,22 +293,20 @@ def _save_challenges(hermes_home: str, data: dict) -> None:
         json.dump(data, f, indent=2)
 
 
-def create_challenge(hermes_home: str, chain_id: int, token_id: int, wallet_address: str) -> dict:
+def create_challenge(hermes_home: str, chain_id: int, token_id: int) -> dict:
     nonce = secrets.token_hex(8)
     issued = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     expires_ts = time.time() + CHALLENGE_TTL_SECONDS
     expires = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(expires_ts))
     message = (
-        "khora.fun wants you to authorize this wallet as your agent\n\n"
-        f"Wallet: {wallet_address}\n"
-        f"For BOOA #{token_id} on chainId {chain_id}\n\n"
+        "khora.fun — verify wallet control for BOOA agent\n\n"
+        f"BOOA #{token_id} on chainId {chain_id}\n\n"
         f"Nonce: {nonce}\n"
         f"Issued At: {issued}\n"
         f"Expires: {expires}"
     )
     record = {
         "message": message,
-        "wallet_address": wallet_address,
         "chain_id": chain_id,
         "token_id": token_id,
         "created_at": time.time(),
@@ -340,19 +345,12 @@ def verify_challenge(
     except Exception as exc:
         return {"ok": False, "error": f"signature invalid: {exc}"}
 
-    claimed = record["wallet_address"]
-    if not claimed or recovered.lower() != claimed.lower():
-        return {
-            "ok": False,
-            "error": f"recovered {recovered} does not match claimed {claimed}",
-        }
-
     data.pop(nonce, None)
     _save_challenges(hermes_home, data)
 
     prev = read_state(hermes_home) or WalletState(state="unverified", updated_at=time.time())
     prev.last_signed_nonce = nonce
-    prev.agent_wallet = recovered
+    prev.verified_wallet = recovered
     write_state(hermes_home, prev)
     new_state = refresh(hermes_home, chain_id, token_id)
     return {"ok": True, "recovered": recovered, "state": new_state.state}
