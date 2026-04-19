@@ -24,6 +24,7 @@ from booa.writer import (
     generate_user_md, mark_setup_complete, is_setup_complete,
     write_security_rules, install_output_filter_hook, migrate_pairing_files,
 )
+from booa import wallet_status
 from booa.gateway import GatewayManager
 
 # Config
@@ -228,6 +229,10 @@ async def wizard_step4(request: Request):
     )
 
     mark_setup_complete(HERMES_HOME)
+    try:
+        wallet_status.refresh(HERMES_HOME, 360, int(wizard_data.get("token_id", 0)))
+    except Exception:
+        pass
     await gateway.start()
 
     return RedirectResponse("/dashboard", status_code=303)
@@ -550,6 +555,71 @@ async def reset_wizard(request: Request):
     return RedirectResponse("/wizard", status_code=303)
 
 
+# ── Wallet status / verification ───────────────────────────────────────────────
+
+def _token_chain_from_wizard() -> tuple[int, int] | None:
+    tok = wizard_data.get("token_id")
+    if not tok:
+        return None
+    try:
+        return int(tok), 360
+    except (TypeError, ValueError):
+        return None
+
+
+async def wallet_status_get(request: Request):
+    require_auth_json = request.session.get("authenticated")
+    state = wallet_status.read_state(HERMES_HOME)
+    if state is None:
+        return JSONResponse({"state": "unknown", "message": "no state yet"})
+    return JSONResponse(vars(state))
+
+
+async def wallet_refresh(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    tc = _token_chain_from_wizard()
+    if tc is None:
+        return JSONResponse({"error": "setup incomplete"}, status_code=400)
+    token_id, chain_id = tc
+    state = wallet_status.refresh(HERMES_HOME, chain_id, token_id)
+    return JSONResponse(vars(state))
+
+
+async def wallet_challenge_create(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    tc = _token_chain_from_wizard()
+    if tc is None:
+        return JSONResponse({"error": "setup incomplete"}, status_code=400)
+    token_id, chain_id = tc
+    wallet_addr = wallet_status._read_local_wallet(HERMES_HOME)
+    if not wallet_addr:
+        return JSONResponse({"error": "no local wallet; run /ows first"}, status_code=400)
+    payload = wallet_status.create_challenge(HERMES_HOME, chain_id, token_id, wallet_addr)
+    return JSONResponse({"wallet_address": wallet_addr, **payload})
+
+
+async def wallet_verify_post(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    tc = _token_chain_from_wizard()
+    if tc is None:
+        return JSONResponse({"error": "setup incomplete"}, status_code=400)
+    token_id, chain_id = tc
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+    nonce = body.get("nonce")
+    signature = body.get("signature")
+    if not nonce or not signature:
+        return JSONResponse({"error": "nonce and signature required"}, status_code=400)
+    result = wallet_status.verify_challenge(HERMES_HOME, chain_id, token_id, nonce, signature)
+    status = 200 if result.get("ok") else 400
+    return JSONResponse(result, status_code=status)
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 
 routes = [
@@ -576,6 +646,10 @@ routes = [
     Route("/pairing", pairing_list),
     Route("/pairing/approve", pairing_approve, methods=["POST"]),
     Route("/pairing/deny", pairing_deny, methods=["POST"]),
+    Route("/api/wallet/status", wallet_status_get),
+    Route("/api/wallet/refresh", wallet_refresh, methods=["POST"]),
+    Route("/api/wallet/challenge", wallet_challenge_create, methods=["POST"]),
+    Route("/api/wallet/verify", wallet_verify_post, methods=["POST"]),
     Mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static"),
 ]
 
@@ -586,6 +660,13 @@ async def lifespan(app):
     migrate_pairing_files(HERMES_HOME)
     if is_setup_complete(HERMES_HOME):
         install_output_filter_hook(HERMES_HOME)
+        tc = _token_chain_from_wizard()
+        if tc is not None:
+            try:
+                token_id, chain_id = tc
+                wallet_status.refresh(HERMES_HOME, chain_id, token_id)
+            except Exception as exc:
+                print(f"[khora] wallet status refresh failed: {exc}", flush=True)
         print("[khora] Setup complete — auto-starting gateway", flush=True)
         await gateway.start()
     yield

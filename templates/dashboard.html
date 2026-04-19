@@ -92,6 +92,25 @@
   </div>
 </div>
 
+<div class="card" id="wallet-status-section">
+  <h3>Agent Wallet Status</h3>
+  <div id="wallet-status-body" class="text-xs text-muted">Checking…</div>
+  <div class="flex gap-2 mt-2">
+    <button onclick="refreshWalletStatus()" class="btn-sm btn-outline">Refresh</button>
+    <button id="wallet-verify-btn" onclick="startWalletVerify()" class="btn-sm btn-outline" style="display:none;">Verify Wallet</button>
+  </div>
+  <div id="wallet-challenge-box" style="display:none;" class="mt-2">
+    <div class="info-box text-xs">
+      Give this challenge to your agent and ask it to sign with OWS.
+      Then paste the signature below and click <strong>Submit</strong>.
+    </div>
+    <textarea id="wallet-challenge-text" readonly class="mt-1" style="width:100%;height:120px;font-family:monospace;font-size:11px;"></textarea>
+    <input id="wallet-signature-input" placeholder="0x…signature" class="mt-1" style="width:100%;font-family:monospace;font-size:11px;">
+    <button onclick="submitWalletSignature()" class="btn-sm mt-1">Submit signature</button>
+    <span id="wallet-verify-result" class="text-xs text-muted ml-2"></span>
+  </div>
+</div>
+
 <div class="card" id="pairing-section">
   <h3>Telegram Pairing</h3>
   <div id="pairing-connected" style="display:none;">
@@ -205,8 +224,74 @@ function confirmExport() {
   }
 }
 
-setInterval(() => { checkPairing(); checkErrors(); }, 3000);
+const WALLET_STATES = {
+  'no-wallet': { emoji: '⚠', text: 'No wallet configured. Tell your agent "/ows" to set one up.', canVerify: false },
+  'unverified': { emoji: '🟡', text: 'Wallet present but not verified. Click Verify Wallet to sign a challenge.', canVerify: true },
+  'verified': { emoji: '🟠', text: 'Wallet verified (signed) but not linked to ERC-8004 yet. Register on 8004scan.io.', canVerify: true },
+  'linked': { emoji: '✅', text: 'Wallet verified and linked to ERC-8004.', canVerify: false },
+  'orphan': { emoji: '🔴', text: 'ORPHAN — NFT ownership has moved to another wallet.', canVerify: false },
+  'unknown': { emoji: '❓', text: 'Status unknown (Khôra API unreachable).', canVerify: false },
+};
+
+async function renderWalletStatus() {
+  try {
+    const res = await fetch('/api/wallet/status');
+    const data = await res.json();
+    const body = document.getElementById('wallet-status-body');
+    const btn = document.getElementById('wallet-verify-btn');
+    const def = WALLET_STATES[data.state] || WALLET_STATES['unknown'];
+    const walletStr = data.agent_wallet ? ` · <code>${data.agent_wallet.slice(0,6)}...${data.agent_wallet.slice(-4)}</code>` : '';
+    body.innerHTML = `${def.emoji} <strong>${data.state}</strong>${walletStr}<br><span class="text-xs text-muted">${def.text}</span>`;
+    btn.style.display = def.canVerify ? '' : 'none';
+  } catch (e) {
+    document.getElementById('wallet-status-body').textContent = 'failed to fetch status';
+  }
+}
+
+async function refreshWalletStatus() {
+  await fetch('/api/wallet/refresh', { method: 'POST' });
+  renderWalletStatus();
+}
+
+async function startWalletVerify() {
+  const res = await fetch('/api/wallet/challenge', { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json();
+    alert('Challenge failed: ' + (err.error || 'unknown'));
+    return;
+  }
+  const data = await res.json();
+  document.getElementById('wallet-challenge-text').value = data.message;
+  document.getElementById('wallet-signature-input').value = '';
+  document.getElementById('wallet-verify-result').textContent = '';
+  document.getElementById('wallet-challenge-box').style.display = '';
+  document.getElementById('wallet-challenge-box').dataset.nonce = data.nonce;
+}
+
+async function submitWalletSignature() {
+  const box = document.getElementById('wallet-challenge-box');
+  const nonce = box.dataset.nonce;
+  const signature = document.getElementById('wallet-signature-input').value.trim();
+  if (!signature) return;
+  const res = await fetch('/api/wallet/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nonce, signature }),
+  });
+  const data = await res.json();
+  const out = document.getElementById('wallet-verify-result');
+  if (data.ok) {
+    out.textContent = `✅ Verified (state: ${data.state})`;
+    box.style.display = 'none';
+    renderWalletStatus();
+  } else {
+    out.textContent = '❌ ' + (data.error || 'verification failed');
+  }
+}
+
+setInterval(() => { checkPairing(); checkErrors(); renderWalletStatus(); }, 3000);
 checkPairing();
 checkErrors();
+renderWalletStatus();
 </script>
 {% endblock %}

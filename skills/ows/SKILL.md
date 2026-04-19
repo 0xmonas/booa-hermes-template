@@ -92,6 +92,21 @@ echo "EVM Address: 0xYourAgentWalletAddress" > /data/.agent/wallet-info.txt
 chmod 644 /data/.agent/wallet-info.txt
 ```
 
+### Step 4b — Verify wallet on the Khôra dashboard
+
+After a wallet is created or imported, the operator should verify it through the dashboard so your agent status flips to `verified` (or `linked`, if 8004 already records this wallet). Tell the operator:
+
+1. Open the dashboard → **Agent Wallet Status** card
+2. Click **Verify Wallet** — a challenge message appears
+3. Ask you (the agent) to sign the challenge with OWS:
+   ```bash
+   OWS_PASSPHRASE=<ows_key_...> \
+     ows sign message --wallet my-agent --chain shape --message "<pasted challenge>"
+   ```
+4. Paste the returned signature into the dashboard input and click **Submit**
+
+Until this is done, the dashboard shows `⚠ unverified` and your context prompt reminds you at every turn. Do not treat the operator as having proven wallet control until the signature is accepted.
+
 ### Step 5 — Report to operator
 
 Summarise in chat (never reveal the private key or mnemonic):
