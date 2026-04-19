@@ -24,35 +24,14 @@
 </div>
 {% elif verified == true %}
 <div class="card" style="border-color: var(--green);">
-  <div class="flex items-center justify-between">
-    <span class="status-badge active">8004 Identity Verified</span>
-    {% if wallet_address and agent_wallet_registered %}
-    <span class="status-badge active">Agent Wallet Registered</span>
-    {% elif wallet_address and not agent_wallet_registered %}
-    <span class="status-badge" style="border-color:var(--red);color:var(--red);">New Wallet Not Linked</span>
-    {% endif %}
-  </div>
-  {% if wallet_address or registered_by %}
+  <span class="status-badge active">8004 Identity Verified</span>
+  {% if registered_by or nft_owner %}
   <div class="info-box mt-2">
     {% if registered_by %}
     <div class="stat"><strong>8004 Owner:</strong> <code>{{ registered_by[:6] }}...{{ registered_by[-4:] }}</code></div>
     {% endif %}
     {% if nft_owner %}
     <div class="stat"><strong>NFT Owner:</strong> <code>{{ nft_owner[:6] }}...{{ nft_owner[-4:] }}</code></div>
-    {% endif %}
-    {% if wallet_address %}
-    <div class="stat"><strong>Hermes Wallet:</strong> <code>{{ wallet_address[:6] }}...{{ wallet_address[-4:] }}</code>
-      {% if agent_wallet_registered %}
-      <span class="text-green">linked</span>
-      {% else %}
-      <span style="color:var(--red);">not linked</span>
-      {% endif %}
-    </div>
-    {% endif %}
-    {% if wallet_address and not agent_wallet_registered %}
-    <div class="mt-2 text-xs">
-      To link this wallet, go to <a href="https://8004scan.io/my-agents" target="_blank">8004scan.io/my-agents</a> and set <code>{{ wallet_address }}</code> as your agent wallet, or transfer 8004 ownership to it.
-    </div>
     {% endif %}
   </div>
   {% endif %}
