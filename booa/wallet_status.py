@@ -352,5 +352,31 @@ def verify_challenge(
     prev.last_signed_nonce = nonce
     prev.verified_wallet = recovered
     write_state(hermes_home, prev)
+    _update_wallet_info_txt(recovered)
     new_state = refresh(hermes_home, chain_id, token_id)
     return {"ok": True, "recovered": recovered, "state": new_state.state}
+
+
+def _update_wallet_info_txt(address: str) -> None:
+    path = "/data/.agent/wallet-info.txt"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    existing = ""
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                existing = f.read()
+        except OSError:
+            existing = ""
+    line = f"EVM Address: {address}"
+    if "EVM Address:" in existing:
+        lines = [line if "EVM Address:" in l else l for l in existing.splitlines()]
+        new = "\n".join(lines)
+        if not new.endswith("\n"):
+            new += "\n"
+    else:
+        new = (existing.rstrip() + "\n" if existing else "") + line + "\n"
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(new)
+    except OSError:
+        pass
