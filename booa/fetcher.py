@@ -1,12 +1,12 @@
-"""Fetch BOOA identity files from khora.fun API."""
+"""Fetch BOOA identity files from booa.app API."""
 
 import os
 from pathlib import Path
 
 import httpx
 
-KHORA_API = "https://khora.fun/api/agent-files/360"
-KHORA_SKILLS_URL = "https://khora.fun/skills"
+BOOA_API = "https://booa.app/api/agent-files/360"
+BOOA_SKILLS_URL = "https://booa.app/skills"
 COBBEE_SKILLS_URL = "https://cobbee.fun/skills"
 
 # Local skills bundled with the template (read from repo at build time).
@@ -20,10 +20,10 @@ class TokenNotFound(Exception):
 async def fetch_booa_identity(token_id: int) -> dict:
     """Fetch all identity files for a BOOA token."""
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        soul = await client.get(f"{KHORA_API}/{token_id}/soul.md")
-        identity = await client.get(f"{KHORA_API}/{token_id}/identity.md")
-        avatar = await client.get(f"{KHORA_API}/{token_id}/avatar.svg")
-        agent_json = await client.get(f"{KHORA_API}/{token_id}/agent.json")
+        soul = await client.get(f"{BOOA_API}/{token_id}/soul.md")
+        identity = await client.get(f"{BOOA_API}/{token_id}/identity.md")
+        avatar = await client.get(f"{BOOA_API}/{token_id}/avatar.svg")
+        agent_json = await client.get(f"{BOOA_API}/{token_id}/agent.json")
 
     if soul.status_code == 404:
         raise TokenNotFound(f"BOOA #{token_id} not found")
@@ -45,8 +45,8 @@ async def fetch_booa_identity(token_id: int) -> dict:
 
 SKILL_URLS = {
     "khora": {
-        "SKILL.md": f"{KHORA_SKILLS_URL}/SKILL.md",
-        "references/wallet-setup.md": f"{KHORA_SKILLS_URL}/references/wallet-setup.md",
+        "SKILL.md": f"{BOOA_SKILLS_URL}/SKILL.md",
+        "references/wallet-setup.md": f"{BOOA_SKILLS_URL}/references/wallet-setup.md",
     },
     "cobbee": {
         "SKILL.md": f"{COBBEE_SKILLS_URL}/SKILL.md",
@@ -81,7 +81,7 @@ def load_local_skills() -> dict[str, dict[str, str]]:
 
 
 async def fetch_skills() -> dict[str, dict[str, str]]:
-    """Fetch all pre-installed skills — remote (Khôra, Cobbee) merged with local bundled skills."""
+    """Fetch all pre-installed skills — remote (BOOA, Cobbee) merged with local bundled skills."""
     results: dict[str, dict[str, str]] = load_local_skills()
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         for skill_name, files in SKILL_URLS.items():

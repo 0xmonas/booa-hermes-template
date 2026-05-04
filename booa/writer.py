@@ -132,8 +132,8 @@ def write_seed_memory(hermes_home: str, booa_data: dict):
 I am {booa_data['name']}, BOOA #{booa_data['token_id']} on Shape Network. My identity and pixel art are stored fully on-chain.
 
 ## Key Facts
-- My on-chain identity: khora.fun/api/agent-files/360/{booa_data['token_id']}
-- Khôra collection: 3,333 BOOAs on Shape Network
+- My on-chain identity: booa.app/api/agent-files/360/{booa_data['token_id']}
+- BOOA collection: 3,333 BOOAs on Shape Network
 - My creature type: {booa_data.get('creature', 'unknown')}
 - My vibe: {booa_data.get('vibe', 'unknown')}
 

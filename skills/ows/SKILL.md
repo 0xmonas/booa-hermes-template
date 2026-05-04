@@ -61,7 +61,7 @@ Before considering the setup done, validate on-chain state. Use the token ID fro
 
 ```bash
 # Fetch current NFT owner and 8004 registration
-curl -s "https://khora.fun/api/agent-registry/360/<TOKEN_ID>"
+curl -s "https://booa.app/api/agent-registry/360/<TOKEN_ID>"
 ```
 
 Check three things:
@@ -92,7 +92,7 @@ echo "EVM Address: 0xYourAgentWalletAddress" > /data/.agent/wallet-info.txt
 chmod 644 /data/.agent/wallet-info.txt
 ```
 
-### Step 4b — Verify wallet on the Khôra dashboard
+### Step 4b — Verify wallet on the BOOA dashboard
 
 After a wallet is created or imported, the operator should verify it through the dashboard so your agent status flips to `verified` (or `linked`, if 8004 already records this wallet). Tell the operator:
 

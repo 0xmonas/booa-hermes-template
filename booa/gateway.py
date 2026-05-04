@@ -46,10 +46,10 @@ class GatewayManager:
             import time
             self._started_at = time.time()
             self._read_task = asyncio.create_task(self._read_output())
-            self.log_lines.append("[khora] gateway started")
+            self.log_lines.append("[booa] gateway started")
             return True
         except Exception as e:
-            self.log_lines.append(f"[khora] failed to start gateway: {e}")
+            self.log_lines.append(f"[booa] failed to start gateway: {e}")
             return False
 
     async def stop(self) -> bool:
@@ -64,7 +64,7 @@ class GatewayManager:
                 self.process.kill()
                 await self.process.wait()
 
-            self.log_lines.append("[khora] gateway stopped")
+            self.log_lines.append("[booa] gateway stopped")
             self.process = None
             self._started_at = None
 
@@ -74,7 +74,7 @@ class GatewayManager:
 
             return True
         except Exception as e:
-            self.log_lines.append(f"[khora] failed to stop gateway: {e}")
+            self.log_lines.append(f"[booa] failed to stop gateway: {e}")
             return False
 
     async def restart(self) -> bool:

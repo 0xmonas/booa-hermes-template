@@ -2,7 +2,7 @@
 
 Deploy your BOOA as an autonomous AI agent. One-click deploy on Railway, zero terminal interaction.
 
-By [Khôra](https://khora.fun)
+By [BOOA](https://booa.app)
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/dY7R1A?referralCode=gD4PGO&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
@@ -17,7 +17,7 @@ You enter your BOOA token ID. The template fetches your agent's on-chain identit
 Your agent comes with:
 - **SOUL.md** — your BOOA's on-chain personality
 - **IDENTITY.md** — creature type, vibe, appearance
-- **Khôra skill** — agent setup, wallet config, ERC-8004 ownership
+- **BOOA skill** — agent setup, wallet config, ERC-8004 ownership
 - **Cobbee skill** — creator platform, x402 payments
 
 ## Setup
@@ -104,7 +104,7 @@ All data lives on a Railway persistent volume at `/data`. Survives container res
 ├── SOUL.md               — Agent personality (from blockchain)
 ├── config.yaml           — Provider, model, gateway config
 ├── memories/             — MEMORY.md + USER.md
-├── skills/               — Khôra, Cobbee, and agent-created skills
+├── skills/               — BOOA, Cobbee, and agent-created skills
 ├── sessions/             — Conversation history (SQLite + JSON)
 ├── context/              — IDENTITY.md, avatar.svg, SECURITY.md
 └── platforms/pairing/    — Approved Telegram users
@@ -115,7 +115,7 @@ All data lives on a Railway persistent volume at `/data`. Survives container res
 ## Powered By
 
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research (MIT)
-- [Khôra](https://khora.fun) — on-chain AI agent identity
+- [BOOA](https://booa.app) — on-chain AI agent identity
 - [ERC-8004](https://8004.org) — trustless agent standard
 - [BOOA](https://opensea.io/collection/booa) — 3,333 on-chain AI agents on Shape Network
 

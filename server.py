@@ -1,4 +1,4 @@
-"""Khôra BOOA Hermes Agent — Railway admin server."""
+"""BOOA Hermes Agent — Railway admin server."""
 
 import asyncio
 import json
@@ -35,7 +35,7 @@ PORT = int(os.environ.get("PORT", "8080"))
 
 if not ADMIN_PASSWORD:
     ADMIN_PASSWORD = secrets.token_urlsafe(16)
-    print(f"[khora] Admin credentials — username: {ADMIN_USERNAME}  password: {ADMIN_PASSWORD}", flush=True)
+    print(f"[booa] Admin credentials — username: {ADMIN_USERNAME}  password: {ADMIN_PASSWORD}", flush=True)
 
 # Session secret (persist across restarts)
 ensure_dirs(HERMES_HOME)
@@ -258,7 +258,7 @@ async def dashboard_page(request: Request):
                 wallet_address = line.split("EVM Address:")[-1].strip()
                 break
 
-    # Check verified + agent wallet status from Khôra API
+    # Check verified + agent wallet status from BOOA API
     verified = None
     agent_wallet_registered = False
     reg_data = {}
@@ -267,7 +267,7 @@ async def dashboard_page(request: Request):
         try:
             import httpx
             resp = httpx.get(
-                f"https://khora.fun/api/agent-registry/360/{token_id}",
+                f"https://booa.app/api/agent-registry/360/{token_id}",
                 timeout=10,
                 follow_redirects=True,
             )
@@ -668,8 +668,8 @@ async def lifespan(app):
                 token_id, chain_id = tc
                 wallet_status.refresh(HERMES_HOME, chain_id, token_id)
             except Exception as exc:
-                print(f"[khora] wallet status refresh failed: {exc}", flush=True)
-        print("[khora] Setup complete — auto-starting gateway", flush=True)
+                print(f"[booa] wallet status refresh failed: {exc}", flush=True)
+        print("[booa] Setup complete — auto-starting gateway", flush=True)
         await gateway.start()
     yield
     await gateway.stop()
@@ -682,6 +682,6 @@ app = Starlette(
 )
 
 if __name__ == "__main__":
-    print(f"[khora] Starting on port {PORT}", flush=True)
-    print(f"[khora] HERMES_HOME={HERMES_HOME}", flush=True)
+    print(f"[booa] Starting on port {PORT}", flush=True)
+    print(f"[booa] HERMES_HOME={HERMES_HOME}", flush=True)
     uvicorn.run(app, host="0.0.0.0", port=PORT)

@@ -18,7 +18,7 @@ Open http://localhost:8080 to test.
 ```
 server.py              — Admin server (Starlette + Uvicorn)
 booa/
-  fetcher.py           — Fetch BOOA identity from khora.fun API
+  fetcher.py           — Fetch BOOA identity from booa.app API
   writer.py            — Write Hermes files (SOUL.md, USER.md, skills, config)
   gateway.py           — Hermes gateway subprocess manager
   onboarding.py        — Wizard state management

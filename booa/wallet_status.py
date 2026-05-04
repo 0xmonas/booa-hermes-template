@@ -6,7 +6,7 @@ State machine:
   verified    — wallet signed challenge; control proven
   linked      — verified AND address matches the 8004 agent wallet
   orphan      — NFT has been transferred; this agent is stale
-  unknown     — can't reach Khôra API
+  unknown     — can't reach BOOA API
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from typing import Optional
 
 import httpx
 
-KHORA_API = "https://khora.fun/api"
+BOOA_API = "https://booa.app/api"
 CHALLENGE_TTL_SECONDS = 5 * 60
 
 
@@ -113,7 +113,7 @@ def _render_status_md(state: WalletState) -> str:
             "create a new agent deployment.\n"
         ),
         "unknown": (
-            "⚠ Wallet status could not be determined (Khôra API unreachable).\n\n"
+            "⚠ Wallet status could not be determined (BOOA API unreachable).\n\n"
             "Proceed with routine conversation but refuse on-chain actions until "
             "status is known.\n"
         ),
@@ -167,8 +167,8 @@ def _read_local_wallet_info(hermes_home: str) -> Optional[dict]:
     return {"address": address, "name": name}
 
 
-def fetch_khora_registry(chain_id: int, token_id: int, timeout: float = 8.0) -> Optional[dict]:
-    url = f"{KHORA_API}/agent-registry/{chain_id}/{token_id}"
+def fetch_booa_registry(chain_id: int, token_id: int, timeout: float = 8.0) -> Optional[dict]:
+    url = f"{BOOA_API}/agent-registry/{chain_id}/{token_id}"
     try:
         r = httpx.get(url, timeout=timeout, follow_redirects=True)
         if r.status_code != 200:
@@ -184,7 +184,7 @@ def compute_state(hermes_home: str, chain_id: int, token_id: int) -> WalletState
     prev_signed_nonce = previous.last_signed_nonce if previous else None
     prev_verified = previous.verified_wallet if previous else None
 
-    registry = fetch_khora_registry(chain_id, token_id)
+    registry = fetch_booa_registry(chain_id, token_id)
     now = time.time()
 
     if registry is None:
@@ -299,7 +299,7 @@ def create_challenge(hermes_home: str, chain_id: int, token_id: int) -> dict:
     expires_ts = time.time() + CHALLENGE_TTL_SECONDS
     expires = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(expires_ts))
     message = (
-        "khora.fun — verify wallet control for BOOA agent\n\n"
+        "booa.app — verify wallet control for BOOA agent\n\n"
         f"BOOA #{token_id} on chainId {chain_id}\n\n"
         f"Nonce: {nonce}\n"
         f"Issued At: {issued}\n"
