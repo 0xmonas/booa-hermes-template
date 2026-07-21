@@ -77,6 +77,14 @@
   <div class="flex gap-2 mt-2">
     <button onclick="refreshWalletStatus()" class="btn-sm btn-outline" title="Re-fetch on-chain state from BOOA registry (does not re-sign)">Refresh</button>
     <button id="wallet-verify-btn" onclick="startWalletVerify()" class="btn-sm btn-outline" style="display:none;" title="Prove control of a wallet via signature. Running this with a different wallet switches your verified wallet.">Verify Wallet</button>
+    <button id="wallet-link-btn" onclick="generateLinkCode()" class="btn-sm btn-outline" style="display:none;" title="Generate the link code to paste into the BOOA Bridge (Agents tab) to set this wallet as the agent's onchain wallet.">Generate link code</button>
+  </div>
+  <div id="wallet-link-box" style="display:none;" class="mt-2">
+    <div class="info-box text-xs">
+      Paste this into <a href="https://booa.app/bridge" target="_blank">booa.app/bridge</a> → <strong>Agents</strong> tab → select this agent → <strong>Runtime wallet</strong>, then confirm with your <strong>holder</strong> wallet. Valid for 1 hour.
+    </div>
+    <textarea id="wallet-link-code" readonly class="mt-1" style="width:100%;height:90px;font-family:monospace;font-size:11px;"></textarea>
+    <span id="wallet-link-result" class="text-xs text-muted"></span>
   </div>
   <div id="wallet-challenge-box" style="display:none;" class="mt-2">
     <div class="info-box text-xs">
@@ -204,12 +212,12 @@ function confirmExport() {
 }
 
 const WALLET_STATES = {
-  'no-wallet':  { emoji: '⚠',  text: 'No wallet configured. Tell your agent "/ows" to set one up.', canVerify: false, verifyLabel: 'Verify Wallet' },
-  'unverified': { emoji: '🟡', text: 'Wallet present but not verified. Click Verify Wallet to sign a challenge.', canVerify: true, verifyLabel: 'Verify Wallet' },
-  'verified':   { emoji: '🟠', text: 'Wallet verified (signed) but not linked to ERC-8004 yet. Register on 8004scan.io.', canVerify: true, verifyLabel: 'Verify another wallet' },
-  'linked':     { emoji: '✅', text: 'Wallet verified and linked to ERC-8004.', canVerify: true, verifyLabel: 'Verify a different wallet' },
-  'orphan':     { emoji: '🔴', text: 'ORPHAN — NFT ownership has moved to another wallet.', canVerify: true, verifyLabel: 'Verify the new owner wallet' },
-  'unknown':    { emoji: '❓', text: 'Status unknown (BOOA API unreachable). Click Refresh to retry.', canVerify: false, verifyLabel: 'Verify Wallet' },
+  'no-wallet':  { emoji: '⚠',  text: 'No wallet configured. Tell your agent "/ows" to set one up.', canVerify: false, canLink: false, verifyLabel: 'Verify Wallet' },
+  'unverified': { emoji: '🟡', text: 'Wallet present but not verified. Click Verify Wallet to sign a challenge.', canVerify: true, canLink: false, verifyLabel: 'Verify Wallet' },
+  'verified':   { emoji: '🟠', text: 'Wallet verified but not linked yet. Generate the link code and paste it into booa.app/bridge (Agents tab) to set this wallet onchain.', canVerify: true, canLink: true, verifyLabel: 'Verify another wallet' },
+  'linked':     { emoji: '✅', text: 'Wallet verified and linked as the agent wallet onchain.', canVerify: true, canLink: true, verifyLabel: 'Verify a different wallet' },
+  'orphan':     { emoji: '🔴', text: 'ORPHAN — NFT ownership has moved to another wallet.', canVerify: true, canLink: false, verifyLabel: 'Verify the new owner wallet' },
+  'unknown':    { emoji: '❓', text: 'Status unknown (BOOA API unreachable). Click Refresh to retry.', canVerify: false, canLink: false, verifyLabel: 'Verify Wallet' },
 };
 
 async function renderWalletStatus() {
@@ -218,14 +226,39 @@ async function renderWalletStatus() {
     const data = await res.json();
     const body = document.getElementById('wallet-status-body');
     const btn = document.getElementById('wallet-verify-btn');
+    const linkBtn = document.getElementById('wallet-link-btn');
     const def = WALLET_STATES[data.state] || WALLET_STATES['unknown'];
     const active = data.verified_wallet || data.agent_wallet;
     const walletStr = active ? ` · <code>${active.slice(0,6)}...${active.slice(-4)}</code>` : '';
     body.innerHTML = `${def.emoji} <strong>${data.state}</strong>${walletStr}<br><span class="text-xs text-muted">${def.text}</span>`;
     btn.textContent = def.verifyLabel;
     btn.style.display = def.canVerify ? '' : 'none';
+    linkBtn.textContent = data.state === 'linked' ? 'Relink runtime wallet' : 'Generate link code';
+    linkBtn.style.display = def.canLink ? '' : 'none';
   } catch (e) {
     document.getElementById('wallet-status-body').textContent = 'failed to fetch status';
+  }
+}
+
+async function generateLinkCode() {
+  const box = document.getElementById('wallet-link-box');
+  const out = document.getElementById('wallet-link-code');
+  const result = document.getElementById('wallet-link-result');
+  box.style.display = '';
+  out.value = '';
+  result.textContent = 'Signing with OWS…';
+  try {
+    const res = await fetch('/api/wallet/link-code', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      result.textContent = 'Failed: ' + (data.error || 'unknown');
+      return;
+    }
+    out.value = data.blob;
+    out.select();
+    result.textContent = 'Copy this and paste it into the Bridge.';
+  } catch (e) {
+    result.textContent = 'Request failed.';
   }
 }
 
