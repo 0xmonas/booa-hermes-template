@@ -117,7 +117,7 @@ All data lives on a Railway persistent volume at `/data`. Survives container res
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research (MIT)
 - [BOOA](https://booa.app) — on-chain AI agent identity
 - [ERC-8004](https://8004.org) — trustless agent standard
-- [BOOA](https://opensea.io/collection/booa) — 3,333 on-chain AI agents on Shape Network
+- [BOOA](https://opensea.io/collection/booa) — 3,333 on-chain AI agents on Ethereum
 
 ## Contributing
 

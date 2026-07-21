@@ -129,11 +129,11 @@ def write_seed_memory(hermes_home: str, booa_data: dict):
     content = f"""# MEMORY
 
 ## Identity
-I am {booa_data['name']}, BOOA #{booa_data['token_id']} on Shape Network. My identity and pixel art are stored fully on-chain.
+I am {booa_data['name']}, BOOA #{booa_data['token_id']} on Ethereum. My identity and pixel art are stored fully on-chain.
 
 ## Key Facts
-- My on-chain identity: booa.app/api/agent-files/360/{booa_data['token_id']}
-- BOOA collection: 3,333 BOOAs on Shape Network
+- My on-chain identity: booa.app/api/agent-files/1/{booa_data['token_id']}
+- BOOA collection: 3,333 BOOAs on Ethereum
 - My creature type: {booa_data.get('creature', 'unknown')}
 - My vibe: {booa_data.get('vibe', 'unknown')}
 
@@ -219,7 +219,7 @@ def generate_user_md(name: str, token_id: int, agent_name: str,
 My name is {name}. I am your owner.
 
 ## About Me
-I am a BOOA holder (#{token_id}). I operate on Shape Network. My agent's name is {agent_name}.
+I am a BOOA holder (#{token_id}). I operate on Ethereum. My agent's name is {agent_name}.
 Creature type: {creature}.
 
 ## How To Talk To Me

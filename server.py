@@ -25,10 +25,14 @@ from booa.writer import (
     write_security_rules, install_output_filter_hook, migrate_pairing_files,
 )
 from booa import wallet_status
+from booa import agent_wallet_link
 from booa.gateway import GatewayManager
 
 # Config
 HERMES_HOME = os.environ.get("HERMES_HOME", "/data/hermes")
+# BOOA's canonical home is Ethereum (chain 1) post-migration. Override only if a
+# BOOA still lives on Shape (360) and hasn't migrated.
+BOOA_CHAIN_ID = int(os.environ.get("BOOA_CHAIN_ID", "1"))
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 PORT = int(os.environ.get("PORT", "8080"))
@@ -230,7 +234,7 @@ async def wizard_step4(request: Request):
 
     mark_setup_complete(HERMES_HOME)
     try:
-        wallet_status.refresh(HERMES_HOME, 360, int(wizard_data.get("token_id", 0)))
+        wallet_status.refresh(HERMES_HOME, BOOA_CHAIN_ID, int(wizard_data.get("token_id", 0)))
     except Exception:
         pass
     await gateway.start()
@@ -267,19 +271,18 @@ async def dashboard_page(request: Request):
         try:
             import httpx
             resp = httpx.get(
-                f"https://booa.app/api/agent-registry/360/{token_id}",
+                f"https://booa.app/api/agent-registry/1/{token_id}",
                 timeout=10,
                 follow_redirects=True,
             )
             if resp.status_code == 200:
                 reg_data = resp.json()
                 verified = reg_data.get("verified")
-                # Check if an agent wallet is registered in 8004
-                # The registeredBy field shows who owns the 8004
-                # If wallet_address matches any known field, wallet is registered
-                registered_by = reg_data.get("registeredBy", "").lower()
-                current_owner = reg_data.get("currentNftOwner", "").lower()
-                if wallet_address and wallet_address.lower() in [registered_by, current_owner]:
+                # The runtime wallet is "linked" when the onchain agent wallet
+                # (adapter.getAgentWallet, exposed as `agentWallet`) equals this
+                # wallet. Bound agents register it via adapter.setAgentWallet.
+                onchain_agent_wallet = (reg_data.get("agentWallet") or "").lower()
+                if wallet_address and onchain_agent_wallet and wallet_address.lower() == onchain_agent_wallet:
                     agent_wallet_registered = True
                     registered_agent_wallet = wallet_address
         except Exception:
@@ -293,6 +296,9 @@ async def dashboard_page(request: Request):
         "wallet_address": wallet_address,
         "verified": verified,
         "agent_wallet_registered": agent_wallet_registered,
+        "agent_wallet": reg_data.get("agentWallet", "") if token_id else "",
+        "bound": reg_data.get("bound", False) if token_id else False,
+        "controller": reg_data.get("controller", "") if token_id else "",
         "registered_by": reg_data.get("registeredBy", "") if token_id else "",
         "nft_owner": reg_data.get("currentNftOwner", "") if token_id else "",
     })
@@ -562,7 +568,7 @@ def _token_chain_from_wizard() -> tuple[int, int] | None:
     if not tok:
         return None
     try:
-        return int(tok), 360
+        return int(tok), BOOA_CHAIN_ID
     except (TypeError, ValueError):
         return None
 
@@ -622,6 +628,23 @@ async def wallet_verify_post(request: Request):
     return JSONResponse(result, status_code=status)
 
 
+async def wallet_link_code_post(request: Request):
+    """Produce the setAgentWallet link code the operator pastes into the BOOA Bridge."""
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    tc = _token_chain_from_wizard()
+    if tc is None:
+        return JSONResponse({"ok": False, "error": "setup incomplete"}, status_code=400)
+    token_id, chain_id = tc
+    info = wallet_status._read_local_wallet_info(HERMES_HOME)
+    if not info or not info.get("address"):
+        return JSONResponse({"ok": False, "error": "No agent wallet yet. Create one with OWS first."}, status_code=400)
+    result = agent_wallet_link.build_link_blob(
+        chain_id, token_id, info.get("name") or "my-agent", info["address"],
+    )
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 
 routes = [
@@ -652,6 +675,7 @@ routes = [
     Route("/api/wallet/refresh", wallet_refresh, methods=["POST"]),
     Route("/api/wallet/challenge", wallet_challenge_create, methods=["POST"]),
     Route("/api/wallet/verify", wallet_verify_post, methods=["POST"]),
+    Route("/api/wallet/link-code", wallet_link_code_post, methods=["POST"]),
     Mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static"),
 ]
 

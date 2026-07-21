@@ -47,7 +47,7 @@ Created wallet 3198bc9c-...
   ...
 ```
 
-> **Save the EVM address** (`eip155:1` line) — this is your agent's wallet address on Shape and Base.
+> **Save the EVM address (`eip155:1` line) — this is your agent's wallet address; it works on Ethereum, Base, and any EVM chain.
 
 ### Step 3: Back Up the Wallet
 
@@ -67,17 +67,17 @@ OWS will prompt for the vault password you set in Step 2, then print the 12-word
 
 ### Step 4: Define a Policy
 
-Create a policy that restricts your agent to specific chains. Start with Shape + Base (primary), expand as needed:
+Create a policy that restricts your agent to specific chains. Start with Ethereum + Base (primary), expand as needed:
 
 ```bash
 cat > policy.json << 'EOF'
 {
   "id": "agent-policy",
-  "name": "Agent: Shape + Base",
+  "name": "Agent: Ethereum + Base",
   "version": 1,
   "created_at": "2026-04-12T00:00:00Z",
   "rules": [
-    { "type": "allowed_chains", "chain_ids": ["eip155:360", "eip155:8453"] },
+    { "type": "allowed_chains", "chain_ids": ["eip155:1", "eip155:8453"] },
     { "type": "expires_at", "timestamp": "2026-12-31T23:59:59Z" }
   ],
   "action": "deny"
@@ -86,7 +86,7 @@ EOF
 ows policy create --file policy.json
 ```
 
-> **Primary chains:** Shape (`eip155:360`) for NFT & 8004 operations, Base (`eip155:8453`) for x402 payments (USDC).
+> **Primary chains:** Ethereum (`eip155:1`) for NFT & 8004 operations, Base (`eip155:8453`) for x402 payments (USDC).
 >
 > **Supported chains for ERC-8004 registration:** Ethereum (`1`), Base (`8453`), Shape (`360`), Polygon (`137`), Arbitrum (`42161`), OP Mainnet (`10`), Avalanche (`43114`), BNB Chain (`56`), Celo (`42220`), Gnosis (`100`), Scroll (`534352`), Linea (`59144`), Mantle (`5000`), Metis (`1088`), Abstract (`2741`), Monad (`10143`). Add chain IDs to `allowed_chains` as your agent needs them.
 
@@ -105,11 +105,11 @@ ows_key_a1b2c3d4...  (shown once — save this)
 
 ### Step 6: Fund the Wallet
 
-Deposit ETH on Shape (for gas) and USDC on Base (for x402 payments):
+Deposit ETH on Ethereum (for gas) and USDC on Base (for x402 payments):
 
 ```bash
-# Shape (gas for 8004 operations)
-ows fund deposit --wallet my-agent --chain shape
+# Ethereum (gas for 8004 operations)
+ows fund deposit --wallet my-agent --chain ethereum
 
 # Base (x402 payments — most platforms use Base for USDC)
 ows fund deposit --wallet my-agent --chain base
@@ -118,7 +118,7 @@ ows fund deposit --wallet my-agent --chain base
 Check balance:
 
 ```bash
-ows fund balance --wallet my-agent --chain shape
+ows fund balance --wallet my-agent --chain ethereum
 ows fund balance --wallet my-agent --chain base
 ```
 
@@ -130,7 +130,7 @@ ows fund balance --wallet my-agent --chain base
 ```bash
 # Sign a message (SIWA authentication)
 OWS_PASSPHRASE="ows_key_a1b2c3d4..." \
-  ows sign message --wallet my-agent --chain shape --message "$SIWA_MESSAGE"
+  ows sign message --wallet my-agent --chain ethereum --message "$SIWA_MESSAGE"
 ```
 
 **Node.js:**
@@ -138,7 +138,7 @@ OWS_PASSPHRASE="ows_key_a1b2c3d4..." \
 import { signMessage } from "@open-wallet-standard/core";
 
 const sig = signMessage(
-  "my-agent", "shape", SIWA_MESSAGE,
+  "my-agent", "ethereum", SIWA_MESSAGE,
   process.env.OWS_API_KEY  // ows_key_...
 );
 ```
@@ -148,7 +148,7 @@ const sig = signMessage(
 from open_wallet_standard import sign_message
 
 sig = sign_message(
-    "my-agent", "shape", siwa_message,
+    "my-agent", "ethereum", siwa_message,
     passphrase=os.environ["OWS_API_KEY"]  # ows_key_...
 )
 ```
@@ -231,52 +231,26 @@ const signature = await wallet.sign(message);
 
 ---
 
-## ERC-8004 Ownership & Agent Wallet
+## Linking the Agent Wallet (Awakened BOOAs)
 
-Your BOOA NFT and ERC-8004 registration are currently on the same personal wallet. After creating a new agent wallet, you need to connect it to your 8004 identity.
+Your BOOA is an onchain agent once you Awaken it (bind it via Adapter8004 on Ethereum at [booa.app/studio/awaken](https://booa.app/studio/awaken)). After you create the agent's own wallet with OWS, you link that wallet to the agent's onchain identity so it can act as itself.
 
-> **Why?** By default, your 8004 identity uses the holder's personal wallet. Separating the agent wallet from the holder wallet is critical — you do not want your agent signing transactions with the same keys that hold your ETH and NFTs.
+> **Why?** Keep the agent's operating wallet separate from the personal wallet that holds your ETH and NFT. The agent signs with its own keys; your holdings stay untouched.
 
-### Scenario A: Set Agent Wallet Only (Minimal)
+Because an Awakened agent is owned onchain by the **adapter** (not by you directly), the wallet is set through the adapter and only your holder wallet — the controller of the bound BOOA — is authorized to submit it. This is a single onchain action.
 
-The holder keeps 8004 ownership. The agent gets an operational wallet.
+### One-step: Set Agent Wallet via the Bridge
 
-1. Go to [8004scan.io/my-agents](https://8004scan.io/my-agents)
-2. Select the agent → **Manage Agent**
-3. **Set Agent Wallet** → enter the new wallet address
-4. Sign the transaction with the holder wallet
+1. In this dashboard, generate the **link code** (it signs an EIP-712 consent with your agent's OWS wallet — proof the wallet agrees to be linked).
+2. Go to [booa.app/bridge](https://booa.app/bridge) → **Agents** tab → select this agent.
+3. Under **Runtime wallet**, paste the link code and confirm the transaction with your **holder** wallet.
+4. Done. The dashboard flips to **linked** once `adapter.getAgentWallet` matches your agent wallet.
 
-> **Result:** Agent can use the wallet for SIWA, x402, and signing. But 8004 metadata updates still require the holder's signature.
+> **Result:** The agent can use its wallet for SIWA, x402, and signing. Your NFT and 8004 identity stay exactly where they are — nothing is transferred, and control still follows whoever holds the BOOA.
+>
+> **Note:** 8004scan's "Set Agent Wallet" form calls the registry directly and will revert for Awakened agents (the adapter is the onchain owner, not you). Use the BOOA Bridge — it routes through the adapter.
 
-### Scenario B: Transfer 8004 to Agent Wallet (Recommended)
-
-The holder transfers the ERC-8004 token (it's an ERC-721) to the agent wallet. The NFT stays in the holder's personal wallet.
-
-1. Go to [8004scan.io/my-agents](https://8004scan.io/my-agents)
-2. Select the agent → **Transfer Ownership**
-3. Enter the agent wallet address
-4. Sign the transaction with the holder wallet
-
-> **Result:** Agent becomes the full owner of its 8004 identity. It can independently call `setAgentURI()`, `setAgentWallet()`, and `setMetadata()`. The NFT stays safely in the holder's wallet. Verification still works because `originalOwner == currentNftOwner`.
-
-### Scenario C: Transfer Everything (Full Handover)
-
-Both NFT and 8004 registration transferred to the agent wallet.
-
-1. Transfer the 8004 token (see Scenario B)
-2. Transfer the BOOA NFT via OpenSea or direct `transferFrom()`
-
-> **Result:** Agent owns everything. Verification works because `current8004Owner == currentNftOwner`. **Warning:** The NFT leaves your personal wallet permanently.
-
-### Which Scenario?
-
-| Scenario | Agent Independence | NFT Safety | Friction |
-|----------|-------------------|-----------|---------|
-| **A** — setAgentWallet | Partial (can sign, can't update 8004) | Safe (stays with holder) | Low |
-| **B** — Transfer 8004 | Full (owns identity) | Safe (stays with holder) | Medium |
-| **C** — Transfer all | Full (owns everything) | Risk (leaves holder) | Medium |
-
-**Recommendation:** Scenario B. Your agent is fully independent, and your NFT is safe.
+Transferring the 8004 token to the agent (the old "full handover" flow) does not apply to Awakened BOOAs: the adapter holds the 8004 token, so there is nothing for you to transfer. setAgentWallet is the complete, safe path.
 
 ---
 
@@ -289,7 +263,7 @@ Before your agent starts operating, verify:
 - [ ] Key file has `600` permissions (owner read/write only)
 - [ ] No secrets in shell history (`HISTCONTROL=ignorespace`)
 - [ ] Wallet has only the minimum required funds
-- [ ] Policy restricts signing to Shape + Base only (OWS)
+- [ ] Policy restricts signing to Ethereum + Base only (OWS)
 - [ ] Backup of mnemonic or private key in secure offline storage
 - [ ] 8004 ownership scenario chosen and executed (A, B, or C)
 - [ ] USER.md written and given to agent (never uploaded publicly)

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import httpx
 
-BOOA_API = "https://booa.app/api/agent-files/360"
+BOOA_API = "https://booa.app/api/agent-files/1"
 BOOA_SKILLS_URL = "https://booa.app/skills"
 COBBEE_SKILLS_URL = "https://cobbee.fun/skills"
 

@@ -3,7 +3,7 @@ name: ows
 version: 1.0.0
 description: Wallet setup and management via Open Wallet Standard. Create a new OWS wallet, import an existing vault, validate on-chain status, and link the wallet to the BOOA agent on ERC-8004. Uses the local OWS vault with policy-gated signing.
 homepage: https://openwallet.sh
-metadata: {"emoji":"🔐","vault_path":"/data/.ows/","dashboard_sync":"/data/.agent/wallet-info.txt","primary_chains":["shape","base"]}
+metadata: {"emoji":"🔐","vault_path":"/data/.ows/","dashboard_sync":"/data/.agent/wallet-info.txt","primary_chains":["ethereum","base"]}
 ---
 
 # /ows — Wallet Setup
@@ -101,7 +101,7 @@ After a wallet is created or imported, the operator should verify it through the
 3. Ask you (the agent) to sign the challenge with OWS:
    ```bash
    OWS_PASSPHRASE=<ows_key_...> \
-     ows sign message --wallet my-agent --chain shape --message "<pasted challenge>"
+     ows sign message --wallet my-agent --chain ethereum --message "<pasted challenge>"
    ```
 4. Paste the returned signature into the dashboard input and click **Submit**
 

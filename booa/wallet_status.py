@@ -237,11 +237,12 @@ def compute_state(hermes_home: str, chain_id: int, token_id: int) -> WalletState
             agent_id=agent_id,
         )
 
-    on_chain_wallets = [
-        (registered_by or "").lower(),
-        (nft_owner or "").lower(),
-    ]
-    if prev_verified.lower() in on_chain_wallets:
+    # Linked once the onchain agent wallet (adapter.getAgentWallet, exposed as
+    # `agentWallet`) matches the wallet we verified control of. For adapter-bound
+    # agents the holder sets it via adapter.setAgentWallet — registeredBy is the
+    # adapter, so the old registeredBy/nft_owner comparison never matched here.
+    onchain_agent_wallet = (registry.get("agentWallet") or "").lower()
+    if onchain_agent_wallet and prev_verified.lower() == onchain_agent_wallet:
         return WalletState(
             state="linked",
             updated_at=now,
