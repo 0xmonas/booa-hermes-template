@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import time
 from typing import Optional
+from urllib.parse import quote
 
-BOOA_API = "https://booa.app/api"
+BOOA_APP = os.environ.get("BOOA_APP_URL", "https://booa.app").rstrip("/")
+BOOA_API = f"{BOOA_APP}/api"
 # ERC-8004 Identity Registry — deterministic CREATE2, same address on every chain.
 REGISTRY_ADDRESS = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
 DOMAIN_NAME = "ERC8004IdentityRegistry"
@@ -133,9 +136,50 @@ def build_link_blob(
     if not signature:
         return {"ok": False, "error": "OWS could not sign. Is a wallet configured (ows wallet list)?"}
 
+    blob = encode_blob(chain_id, int(agent_id), wallet_address, deadline, signature)
     return {
         "ok": True,
-        "blob": encode_blob(chain_id, int(agent_id), wallet_address, deadline, signature),
+        "blob": blob,
+        "url": f"{BOOA_APP}/bridge?link={quote(blob, safe='')}",
         "agentId": int(agent_id),
         "deadline": deadline,
     }
+
+
+def _resolve_from_config() -> Optional[tuple[int, int, str, str]]:
+    """Read (chain_id, token_id, wallet_name, wallet_address) from the agent's saved setup."""
+    from . import wallet_status
+
+    home = os.environ.get("HERMES_HOME", "/data/hermes")
+    chain_id = int(os.environ.get("BOOA_CHAIN_ID", "1"))
+    agent_json = os.path.join(home, "context", "agent.json")
+    token_id = None
+    try:
+        with open(agent_json) as f:
+            token_id = json.load(f).get("token_id")
+    except (OSError, ValueError):
+        pass
+    if not token_id:
+        return None
+    info = wallet_status._read_local_wallet_info(home)
+    if not info or not info.get("address"):
+        return None
+    return chain_id, int(token_id), info.get("name") or "my-agent", info["address"]
+
+
+def main() -> int:
+    """Print the deep-link the operator opens to set this agent's wallet onchain."""
+    resolved = _resolve_from_config()
+    if not resolved:
+        print("No setup or no agent wallet yet. Create a wallet with OWS first.")
+        return 1
+    result = build_link_blob(*resolved)
+    if not result.get("ok"):
+        print(f"Could not build link: {result.get('error')}")
+        return 1
+    print(result["url"])
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

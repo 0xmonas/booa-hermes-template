@@ -81,9 +81,17 @@
   </div>
   <div id="wallet-link-box" style="display:none;" class="mt-2">
     <div class="info-box text-xs">
-      Paste this into <a href="https://booa.app/bridge" target="_blank">booa.app/bridge</a> → <strong>Agents</strong> tab → select this agent → <strong>Runtime wallet</strong>, then confirm with your <strong>holder</strong> wallet. Valid for 1 hour.
+      Open this link (or scan the QR) with the wallet that holds your BOOA, select <strong>agent #<span id="wallet-link-agent">?</span></strong>, and confirm. The link code is pre-filled. Valid for 1 hour.
     </div>
-    <textarea id="wallet-link-code" readonly class="mt-1" style="width:100%;height:90px;font-family:monospace;font-size:11px;"></textarea>
+    <a id="wallet-link-url" href="#" target="_blank" rel="noopener" class="btn btn-sm mt-2" style="display:none;">Open in BOOA Bridge ↗</a>
+    <div id="wallet-link-qr" class="mt-2" style="display:none;">
+      <img id="wallet-link-qr-img" alt="Link QR" style="width:150px;height:150px;image-rendering:pixelated;"/>
+      <div class="text-xs text-muted">On desktop? Scan this with your phone wallet.</div>
+    </div>
+    <details class="mt-2">
+      <summary class="text-xs text-muted" style="cursor:pointer;">Or copy the raw link code</summary>
+      <textarea id="wallet-link-code" readonly class="mt-1" style="width:100%;height:80px;font-family:monospace;font-size:11px;"></textarea>
+    </details>
     <span id="wallet-link-result" class="text-xs text-muted"></span>
   </div>
   <div id="wallet-challenge-box" style="display:none;" class="mt-2">
@@ -213,8 +221,8 @@ function confirmExport() {
 
 const WALLET_STATES = {
   'no-wallet':  { emoji: '⚠',  text: 'No wallet configured. Tell your agent "/ows" to set one up.', canVerify: false, canLink: false, verifyLabel: 'Verify Wallet' },
-  'unverified': { emoji: '🟡', text: 'Wallet present but not verified. Click Verify Wallet to sign a challenge.', canVerify: true, canLink: false, verifyLabel: 'Verify Wallet' },
-  'verified':   { emoji: '🟠', text: 'Wallet verified but not linked yet. Generate the link code and paste it into booa.app/bridge (Agents tab) to set this wallet onchain.', canVerify: true, canLink: true, verifyLabel: 'Verify another wallet' },
+  'unverified': { emoji: '🟡', text: 'Wallet ready. Generate a link code to set it onchain — signing the code also proves you control the wallet.', canVerify: true, canLink: true, verifyLabel: 'Verify Wallet' },
+  'verified':   { emoji: '🟠', text: 'Wallet verified but not linked yet. Generate the link code to set this wallet onchain via booa.app/bridge.', canVerify: true, canLink: true, verifyLabel: 'Verify another wallet' },
   'linked':     { emoji: '✅', text: 'Wallet verified and linked as the agent wallet onchain.', canVerify: true, canLink: true, verifyLabel: 'Verify a different wallet' },
   'orphan':     { emoji: '🔴', text: 'ORPHAN — NFT ownership has moved to another wallet.', canVerify: true, canLink: false, verifyLabel: 'Verify the new owner wallet' },
   'unknown':    { emoji: '❓', text: 'Status unknown (BOOA API unreachable). Click Refresh to retry.', canVerify: false, canLink: false, verifyLabel: 'Verify Wallet' },
@@ -243,9 +251,15 @@ async function renderWalletStatus() {
 async function generateLinkCode() {
   const box = document.getElementById('wallet-link-box');
   const out = document.getElementById('wallet-link-code');
+  const urlBtn = document.getElementById('wallet-link-url');
+  const qrBox = document.getElementById('wallet-link-qr');
+  const qrImg = document.getElementById('wallet-link-qr-img');
+  const agentSpan = document.getElementById('wallet-link-agent');
   const result = document.getElementById('wallet-link-result');
   box.style.display = '';
   out.value = '';
+  urlBtn.style.display = 'none';
+  qrBox.style.display = 'none';
   result.textContent = 'Signing with OWS…';
   try {
     const res = await fetch('/api/wallet/link-code', { method: 'POST' });
@@ -255,8 +269,16 @@ async function generateLinkCode() {
       return;
     }
     out.value = data.blob;
-    out.select();
-    result.textContent = 'Copy this and paste it into the Bridge.';
+    if (data.agentId != null) agentSpan.textContent = data.agentId;
+    if (data.url) {
+      urlBtn.href = data.url;
+      urlBtn.style.display = '';
+    }
+    if (data.qr) {
+      qrImg.src = data.qr;
+      qrBox.style.display = '';
+    }
+    result.textContent = 'Ready — open the link or scan the QR to finish onchain.';
   } catch (e) {
     result.textContent = 'Request failed.';
   }

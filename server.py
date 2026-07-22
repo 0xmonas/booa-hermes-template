@@ -642,7 +642,33 @@ async def wallet_link_code_post(request: Request):
     result = agent_wallet_link.build_link_blob(
         chain_id, token_id, info.get("name") or "my-agent", info["address"],
     )
+    if result.get("ok") and result.get("url"):
+        result["qr"] = _qr_svg_datauri(result["url"])
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+def _qr_svg_datauri(data: str):
+    """Render a QR as a self-contained SVG data-URI (no external calls). None if unavailable."""
+    try:
+        import base64 as _b64
+        import qrcode
+        qr = qrcode.QRCode(border=2, error_correction=qrcode.constants.ERROR_CORRECT_M)
+        qr.add_data(data)
+        qr.make(fit=True)
+        matrix = qr.get_matrix()
+        n = len(matrix)
+        rects = "".join(
+            f'<rect x="{x}" y="{y}" width="1" height="1"/>'
+            for y, row in enumerate(matrix) for x, cell in enumerate(row) if cell
+        )
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {n} {n}" '
+            f'shape-rendering="crispEdges"><rect width="{n}" height="{n}" fill="#fff"/>'
+            f'<g fill="#000">{rects}</g></svg>'
+        )
+        return "data:image/svg+xml;base64," + _b64.b64encode(svg.encode()).decode()
+    except Exception:
+        return None
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
