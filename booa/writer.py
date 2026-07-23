@@ -192,7 +192,8 @@ def write_config(hermes_home: str, provider: str, api_key: str, model: str,
         # the write gate, and the OWS auth token. Use a scoped OWS API key for
         # OWS_PASSPHRASE — never the raw vault password.
         for _k in ("PATH", "OWS_PASSPHRASE", "OWS_BIN", "OWS_WALLET",
-                   "BOOA_ONCHAIN_WRITES", "BOOA_MAX_TX_ETH", "ETH_RPC", "BASE_RPC"):
+                   "BOOA_ONCHAIN_WRITES", "BOOA_MAX_TX_ETH", "BOOA_DAILY_CAP_ETH",
+                   "BOOA_SEND_ALLOWLIST", "ETH_RPC", "BASE_RPC"):
             _v = os.environ.get(_k)
             if _v:
                 mcp_env[_k] = _v

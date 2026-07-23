@@ -286,6 +286,77 @@ def _ows_sign_message(wallet: str, chain: str, *, message: str = "", typed_data:
         return out.stdout.strip()
 
 
+# ── autonomy guardrails: allowlist + two ETH caps ───────────────────────────
+# Preview → confirm protects interactive use, but a cron fires with no human in
+# the loop, so these are the real backstop for autonomous actions. All are
+# opt-in via env; the OWS policy remains the cryptographic gate underneath.
+#   BOOA_SEND_ALLOWLIST  destinations writes may target (wallets/contracts)
+#   BOOA_MAX_TX_ETH      per-transaction native cap
+#   BOOA_DAILY_CAP_ETH   general rolling-day native cap (tracked in a ledger)
+_SPEND_LEDGER = os.path.join(HERMES_HOME, "onchain-spend.json")
+
+
+def _allowlist() -> set:
+    return {a.strip().lower() for a in os.environ.get("BOOA_SEND_ALLOWLIST", "").split(",") if a.strip()}
+
+
+def _cap(name: str) -> Decimal:
+    try:
+        return Decimal(os.environ.get(name, "0") or "0")
+    except Exception:
+        return Decimal(0)
+
+
+def _today() -> str:
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def _spent_today() -> Decimal:
+    try:
+        d = json.load(open(_SPEND_LEDGER))
+        return Decimal(str(d.get("spent", "0"))) if d.get("date") == _today() else Decimal(0)
+    except Exception:
+        return Decimal(0)
+
+
+def _record_spend(native_eth: Decimal) -> None:
+    if native_eth <= 0:
+        return
+    try:
+        with open(_SPEND_LEDGER, "w") as f:
+            json.dump({"date": _today(), "spent": str(_spent_today() + native_eth)}, f)
+    except Exception:
+        pass
+
+
+def _guard_info(dest: str, native_eth: Decimal) -> dict:
+    al, per, daily = _allowlist(), _cap("BOOA_MAX_TX_ETH"), _cap("BOOA_DAILY_CAP_ETH")
+    info = {
+        "allowlist_active": bool(al),
+        "destination_allowed": (not al) or (to_checksum_address(dest).lower() in al),
+        "native_moved_eth": str(native_eth),
+        "per_tx_cap_eth": str(per) if per > 0 else None,
+    }
+    if daily > 0:
+        info["daily_cap_eth"] = str(daily)
+        info["daily_remaining_eth"] = str(daily - _spent_today())
+    return info
+
+
+def _guard(dest: str, native_eth: Decimal) -> None:
+    al = _allowlist()
+    if al and to_checksum_address(dest).lower() not in al:
+        raise PermissionError(f"{to_checksum_address(dest)} is not in BOOA_SEND_ALLOWLIST. Add it to allow this destination.")
+    per = _cap("BOOA_MAX_TX_ETH")
+    if per > 0 and native_eth > per:
+        raise PermissionError(f"Moves {native_eth} ETH, over the per-tx limit {per} (BOOA_MAX_TX_ETH).")
+    daily = _cap("BOOA_DAILY_CAP_ETH")
+    if daily > 0:
+        remaining = daily - _spent_today()
+        if native_eth > remaining:
+            raise PermissionError(f"Moves {native_eth} ETH but only {remaining} ETH left in today's general limit ({daily} BOOA_DAILY_CAP_ETH).")
+
+
 if _writes_enabled():
 
     @mcp.tool()
@@ -308,11 +379,14 @@ if _writes_enabled():
                 cap = os.environ.get("BOOA_MAX_TX_ETH", "0") or "0"
                 if Decimal(cap) > 0 and Decimal(amount) > Decimal(cap):
                     return {"ok": False, "error": f"Native amount {amount} exceeds BOOA_MAX_TX_ETH cap ({cap}). Raise the cap to proceed."}
+            native_eth = Decimal(0) if token else Decimal(amount)
             unsigned, meta = _build_unsigned_1559(chain, w["address"], target, value, data)
-            preview = {"action": "send", "chain": chain, "from": to_checksum_address(w["address"]), "summary": summary, **meta}
+            preview = {"action": "send", "chain": chain, "from": to_checksum_address(w["address"]), "summary": summary, **meta, "guardrails": _guard_info(to, native_eth)}
             if not confirm:
                 return {"ok": True, "preview": preview, "note": "Nothing sent. Show this to the operator, then call again with confirm=true to broadcast."}
+            _guard(to, native_eth)
             txh = _ows_send(chain, w["name"], unsigned)
+            _record_spend(native_eth)
             return {"ok": True, "sent": True, "tx": txh, "explorer": f"{CHAINS[chain]['explorer']}/tx/{txh}", "summary": summary}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -330,11 +404,14 @@ if _writes_enabled():
             types = _parse_types(signature)
             data = "0x" + _selector(signature).hex() + (abi_encode(types, args).hex() if types else "")
             val = int(value)
+            native_eth = Decimal(val) / Decimal(10 ** 18)
             unsigned, meta = _build_unsigned_1559(chain, w["address"], address, val, data)
-            preview = {"action": "write_contract", "chain": chain, "to": to_checksum_address(address), "function": signature, "args": [str(a) for a in args], "value": str(val), **meta}
+            preview = {"action": "write_contract", "chain": chain, "to": to_checksum_address(address), "function": signature, "args": [str(a) for a in args], "value": str(val), **meta, "guardrails": _guard_info(address, native_eth)}
             if not confirm:
                 return {"ok": True, "preview": preview, "note": "Nothing sent. confirm=true to broadcast."}
+            _guard(address, native_eth)
             txh = _ows_send(chain, w["name"], unsigned)
+            _record_spend(native_eth)
             return {"ok": True, "sent": True, "tx": txh, "explorer": f"{CHAINS[chain]['explorer']}/tx/{txh}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -381,8 +458,11 @@ if _writes_enabled():
                 "buy_estimate": _format_units(int(amount_out), out_dec) if amount_out else "?",
                 "router": router, "slippage_bps": slippage_bps, "needs_approval": needs_approval,
             }
+            native_eth = Decimal(sell_amount) if is_native else Decimal(0)
+            preview["guardrails"] = _guard_info(router, native_eth)
             if not confirm:
                 return {"ok": True, "preview": preview, "note": "Nothing swapped. confirm=true approves the exact amount (if needed) and executes."}
+            _guard(router, native_eth)
             txs = []
             if needs_approval:
                 appr = "0x" + _selector("approve(address,uint256)").hex() + abi_encode(["address", "uint256"], [router, amount_in]).hex()
@@ -392,6 +472,7 @@ if _writes_enabled():
                 txs.append({"approve": approve_tx})
             u2, _ = _build_unsigned_1559(chain, owner, router, amount_in if is_native else 0, calldata)
             txs.append({"swap": _ows_send(chain, w["name"], u2)})
+            _record_spend(native_eth)
             return {"ok": True, "sent": True, "txs": txs, "summary": preview}
         except Exception as e:
             return {"ok": False, "error": str(e)}

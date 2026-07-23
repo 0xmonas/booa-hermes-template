@@ -266,7 +266,10 @@ Once the wallet is linked, the agent can act onchain through the **booa-onchain*
 - `BOOA_ONCHAIN_MCP=1` — read tools: `get_balances`, `token_balance`, `read_contract`, `gas_price`, `get_wallet`.
 - `BOOA_ONCHAIN_WRITES=1` — write tools: `send`, `write_contract`, `swap`, `sign_message`, `sign_typed_data`, `x402_pay`. Off by default; reads stay available without it.
 - `OWS_PASSPHRASE` — set to a **scoped OWS API key** (`ows key create --wallet <name> --policy <id>`), never the raw vault password. The policy is your real spending limit.
-- Optional: `BOOA_MAX_TX_ETH` (extra native-value cap), `ETH_RPC` / `BASE_RPC` (custom RPCs).
+- `BOOA_SEND_ALLOWLIST` — comma-separated addresses (wallets or contracts) that writes may target. When set, `send`, `write_contract`, and `swap` refuse any other destination, whatever the agent is told.
+- `BOOA_MAX_TX_ETH` — per-transaction limit (the "işlem limiti"): max native ETH a single tx may move.
+- `BOOA_DAILY_CAP_ETH` — general limit: max native ETH across a rolling day, tracked in a ledger so recurring jobs cannot drain past it.
+- Optional: `ETH_RPC` / `BASE_RPC` (custom RPCs).
 
 **The rule for every write — preview then confirm:**
 
@@ -277,6 +280,19 @@ Once the wallet is linked, the agent can act onchain through the **booa-onchain*
 **Guardrails baked in:** unlimited/near-max ERC-20 approvals are refused (approve only the exact amount). Swaps approve just the sell amount and wait for it to mine before executing. Never touch tokens airdropped by unknown senders (drain scam) — do not approve, swap, or transfer them.
 
 **x402:** `x402_pay(url, method, body)` pays for x402-enabled APIs through `ows pay`. Same preview → confirm flow.
+
+### Autonomous / scheduled actions (cron)
+
+Hermes can run onchain actions on a schedule (`/cron add "every 1h" "..."`). A cron fires in an isolated session with **no human in the loop**, so preview → confirm does not protect it — the agent confirms on its own. For any scheduled money action, the real safety is the OWS policy plus the three guardrails above.
+
+**When the operator asks you to set up a recurring onchain action, do not just create it. First confirm the limits with them:**
+
+1. Ask which **destination(s)** it may pay, and make sure they are in `BOOA_SEND_ALLOWLIST`.
+2. Ask for the **per-transaction limit** (`BOOA_MAX_TX_ETH`) and the **general daily limit** (`BOOA_DAILY_CAP_ETH`). A graduated or high-frequency schedule adds up fast, so walk through what the job spends per day before creating it.
+3. Prefer a `no_agent` script cron for a fixed, deterministic transfer — no LLM in the loop means no prompt-injection surface. Use an LLM cron only when the action needs judgment, and keep the allowlist tight.
+4. Fund the agent wallet with only what the schedule needs.
+
+Never let an autonomous job move value to an address the operator has not explicitly allowlisted.
 
 ---
 
