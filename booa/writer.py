@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import sys
 import yaml
 
 TEMPLATE_VERSION = "1.0.1"
@@ -178,6 +179,32 @@ def write_config(hermes_home: str, provider: str, api_key: str, model: str,
             "reasoning_effort": "medium",
         },
     }
+
+    # Optional onchain read tools (booa-onchain MCP). Gated behind an env flag so
+    # the live fleet is untouched until it's proven on a real deploy — set
+    # BOOA_ONCHAIN_MCP=1 in Railway Variables to enable. A failed MCP server
+    # degrades gracefully (its tools go missing); it never blocks the agent.
+    if os.environ.get("BOOA_ONCHAIN_MCP", "").lower() in ("1", "true", "yes"):
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        mcp_env = {"PYTHONPATH": repo_root, "HERMES_HOME": hermes_home}
+        # Pass through what the onchain server needs even if the MCP launcher
+        # does not inherit the parent env: PATH (to find `ows`), RPC overrides,
+        # the write gate, and the OWS auth token. Use a scoped OWS API key for
+        # OWS_PASSPHRASE — never the raw vault password.
+        for _k in ("PATH", "OWS_PASSPHRASE", "OWS_BIN", "OWS_WALLET",
+                   "BOOA_ONCHAIN_WRITES", "BOOA_MAX_TX_ETH", "ETH_RPC", "BASE_RPC"):
+            _v = os.environ.get(_k)
+            if _v:
+                mcp_env[_k] = _v
+        config["mcp_servers"] = {
+            "booa-onchain": {
+                "command": sys.executable or "python",
+                "args": ["-m", "booa.onchain_mcp"],
+                "enabled": True,
+                "connect_timeout": 20,
+                "env": mcp_env,
+            }
+        }
 
     if telegram_token:
         config["gateway"] = {

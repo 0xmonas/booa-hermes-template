@@ -258,6 +258,28 @@ Transferring the 8004 token to the agent (the old "full handover" flow) does not
 
 ---
 
+## Onchain Actions (booa-onchain MCP)
+
+Once the wallet is linked, the agent can act onchain through the **booa-onchain** MCP server (Ethereum + Base). It never holds a key — every signature is delegated to OWS.
+
+**Enable (Railway Variables):**
+- `BOOA_ONCHAIN_MCP=1` — read tools: `get_balances`, `token_balance`, `read_contract`, `gas_price`, `get_wallet`.
+- `BOOA_ONCHAIN_WRITES=1` — write tools: `send`, `write_contract`, `swap`, `sign_message`, `sign_typed_data`, `x402_pay`. Off by default; reads stay available without it.
+- `OWS_PASSPHRASE` — set to a **scoped OWS API key** (`ows key create --wallet <name> --policy <id>`), never the raw vault password. The policy is your real spending limit.
+- Optional: `BOOA_MAX_TX_ETH` (extra native-value cap), `ETH_RPC` / `BASE_RPC` (custom RPCs).
+
+**The rule for every write — preview then confirm:**
+
+1. Call the tool **without** `confirm` first. It returns a `preview` (what it would do: amount, recipient, token, gas) and signs nothing.
+2. **Show that preview to the operator in chat and get an explicit yes.** This is the OWS "summarise before signing" rule — never skip it.
+3. Only then call again with `confirm=true`. OWS signs and broadcasts; you get a tx hash + explorer link.
+
+**Guardrails baked in:** unlimited/near-max ERC-20 approvals are refused (approve only the exact amount). Swaps approve just the sell amount and wait for it to mine before executing. Never touch tokens airdropped by unknown senders (drain scam) — do not approve, swap, or transfer them.
+
+**x402:** `x402_pay(url, method, body)` pays for x402-enabled APIs through `ows pay`. Same preview → confirm flow.
+
+---
+
 ## Security Checklist
 
 Before your agent starts operating, verify:
