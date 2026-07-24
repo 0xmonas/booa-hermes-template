@@ -374,6 +374,92 @@ def _swap_token_allowed(chain: str, token: str) -> bool:
     return t in safe or t in allow
 
 
+# ── OpenSea execution helpers ────────────────────────────────────────────────
+# OpenSea's REST endpoints return a transaction as function + decoded input_data
+# + a calldata_suffix tag (Seaport). We encode it ourselves, then ALWAYS simulate
+# via eth_call before signing — a wrong encoding or an invalid order reverts in
+# simulation and never reaches the chain.
+OPENSEA_CHAIN = {"ethereum": "ethereum", "base": "base"}
+SEAPORT_16 = "0x0000000000000068F116a894984e2DB1123eB395"
+
+
+def _opensea_api(path: str, method: str = "GET", body: Optional[dict] = None) -> dict:
+    key = os.environ.get("OPENSEA_API_KEY")
+    if not key:
+        raise RuntimeError("OPENSEA_API_KEY not set — OpenSea actions are unavailable.")
+    r = httpx.request(method, "https://api.opensea.io/api/v2" + path,
+                      headers={"X-API-KEY": key, "accept": "application/json"},
+                      json=body, timeout=25)
+    r.raise_for_status()
+    return r.json()
+
+
+def _seaport_types(type_str: str) -> list[str]:
+    inner = type_str[1:-1]
+    out, depth, cur = [], 0, ""
+    for ch in inner:
+        if ch == "(":
+            depth += 1; cur += ch
+        elif ch == ")":
+            depth -= 1; cur += ch
+        elif ch == "," and depth == 0:
+            out.append(cur); cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        out.append(cur)
+    return [t.strip() for t in out]
+
+
+def _seaport_coerce(typ: str, val):
+    if typ.endswith("[]"):
+        return [_seaport_coerce(typ[:-2], v) for v in val]
+    if typ.startswith("(") and typ.endswith(")"):
+        subs = _seaport_types(typ)
+        vals = list(val.values()) if isinstance(val, dict) else val
+        return tuple(_seaport_coerce(t, x) for t, x in zip(subs, vals))
+    if typ.startswith("address"):
+        return to_checksum_address(val)
+    if typ.startswith("uint") or typ.startswith("int"):
+        return int(val)
+    if typ.startswith("bytes"):
+        return to_bytes(hexstr=val)
+    if typ == "bool":
+        return bool(val)
+    return val
+
+
+def _encode_tx_calldata(function: str, input_data: dict, calldata_suffix: str) -> str:
+    arg_types = _seaport_types(function[function.index("("):])
+    selector = keccak(text=function)[:4]
+    coerced = [_seaport_coerce(t, v) for t, v in zip(arg_types, list(input_data.values()))]
+    suffix = to_bytes(hexstr=calldata_suffix) if calldata_suffix else b""
+    return "0x" + (selector + abi_encode(arg_types, coerced) + suffix).hex()
+
+
+def _simulate(chain: str, frm: str, to: str, value: int, data: str) -> Optional[str]:
+    try:
+        _rpc(chain, "eth_call", [{"from": to_checksum_address(frm), "to": to_checksum_address(to),
+                                  "value": hex(value), "data": data}, "latest"])
+        return None
+    except Exception as e:
+        return str(e)
+
+
+def _opensea_collection_verified(chain: str, contract: str):
+    """Return (is_verified, slug, status) for the NFT contract, or None if unknown."""
+    try:
+        c = _opensea_api(f"/chain/{OPENSEA_CHAIN[chain]}/contract/{to_checksum_address(contract)}")
+        slug = c.get("collection")
+        if not slug:
+            return None
+        col = _opensea_api(f"/collections/{slug}")
+        status = col.get("safelist_request_status") or col.get("safelist_status") or ""
+        return (status in ("verified", "approved"), slug, status)
+    except Exception:
+        return None
+
+
 if _writes_enabled():
 
     @mcp.tool()
@@ -545,6 +631,58 @@ if _writes_enabled():
             if out.returncode != 0:
                 raise RuntimeError((out.stderr or out.stdout or "ows pay failed").strip())
             return {"ok": True, "paid": True, "response": out.stdout.strip()[:6000]}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    @mcp.tool()
+    def opensea_buy(chain: str, order_hash: str, protocol_address: str = SEAPORT_16, confirm: bool = False) -> dict:
+        """Buy an NFT on OpenSea by fulfilling a listing. Get order_hash (and protocol_address) from the OpenSea search/listings tools. The transaction is fetched from OpenSea, encoded, and SIMULATED before signing — a bad order, wrong encoding, or unaffordable price is refused. Previews unless confirm=True."""
+        w = _agent_wallet()
+        if not w.get("address"):
+            return {"ok": False, "error": "No agent wallet set."}
+        if chain not in OPENSEA_CHAIN:
+            return {"ok": False, "error": f"OpenSea buy is not wired for {chain}."}
+        try:
+            owner = to_checksum_address(w["address"])
+            fd = _opensea_api("/listings/fulfillment_data", "POST", {
+                "listing": {"hash": order_hash, "chain": OPENSEA_CHAIN[chain], "protocol_address": to_checksum_address(protocol_address)},
+                "fulfiller": {"address": owner},
+            })
+            tx = fd["fulfillment_data"]["transaction"]
+            to = to_checksum_address(tx["to"])
+            value = int(tx["value"])
+            data = _encode_tx_calldata(tx["function"], tx["input_data"], tx.get("calldata_suffix", ""))
+            native_eth = Decimal(value) / Decimal(10 ** 18)
+            params = tx["input_data"].get("parameters", {})
+            nft_contract = params.get("offerToken", "")
+            nft = f"{nft_contract} #{params.get('offerIdentifier', '?')}"
+
+            # verified-collection guard (scam / impersonation protection)
+            require_verified = os.environ.get("BOOA_OPENSEA_REQUIRE_VERIFIED", "1").lower() in ("1", "true", "yes")
+            ver = _opensea_collection_verified(chain, nft_contract) if nft_contract else None
+            verified, slug = (ver[0], ver[1]) if ver else (None, None)
+            if require_verified and verified is not True:
+                return {"ok": False, "error": f"Collection {slug or nft_contract} is not OpenSea-verified (status: {ver[2] if ver else 'unknown'}). Set BOOA_OPENSEA_REQUIRE_VERIFIED=0 to allow unverified collections."}
+
+            # simulate before signing: proves encoding + order validity + affordability
+            sim_err = _simulate(chain, owner, to, value, data)
+            per, daily = _cap("BOOA_MAX_TX_ETH"), _cap("BOOA_DAILY_CAP_ETH")
+            preview = {
+                "action": "opensea_buy", "chain": chain, "nft": nft, "collection": slug,
+                "verified": verified, "price_eth": str(native_eth), "seaport": to,
+                "simulation": "ok" if sim_err is None else f"would revert: {sim_err[:160]}",
+                "guardrails": {"per_tx_cap_eth": str(per) if per > 0 else None,
+                               "daily_remaining_eth": str(daily - _spent_today()) if daily > 0 else None},
+            }
+            if sim_err is not None:
+                return {"ok": False, "error": f"Simulation failed, not buying: {sim_err[:200]}", "preview": preview}
+            if not confirm:
+                return {"ok": True, "preview": preview, "note": "Simulated OK, nothing bought. Show this to the operator, then confirm=true to buy."}
+            _check_caps(native_eth)
+            unsigned, _ = _build_unsigned_1559(chain, owner, to, value, data)
+            txh = _ows_send(chain, w["name"], unsigned)
+            _record_spend(native_eth)
+            return {"ok": True, "bought": True, "nft": nft, "tx": txh, "explorer": f"{CHAINS[chain]['explorer']}/tx/{txh}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 

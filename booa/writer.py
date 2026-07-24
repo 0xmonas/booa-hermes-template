@@ -199,7 +199,7 @@ def write_config(hermes_home: str, provider: str, api_key: str, model: str,
         for _k in ("PATH", "OWS_PASSPHRASE", "OWS_BIN", "OWS_WALLET",
                    "BOOA_ONCHAIN_WRITES", "BOOA_MAX_TX_ETH", "BOOA_DAILY_CAP_ETH",
                    "BOOA_SEND_ALLOWLIST", "BOOA_SWAP_TOKEN_ALLOWLIST", "BOOA_MAX_SLIPPAGE_BPS",
-                   "ETH_RPC", "BASE_RPC", "OPENSEA_API_KEY"):
+                   "ETH_RPC", "BASE_RPC", "OPENSEA_API_KEY", "BOOA_OPENSEA_REQUIRE_VERIFIED"):
             _v = os.environ.get(_k)
             if _v:
                 mcp_env[_k] = _v

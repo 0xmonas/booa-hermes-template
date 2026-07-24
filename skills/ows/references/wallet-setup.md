@@ -264,7 +264,7 @@ Once the wallet is linked, the agent can act onchain through the **booa-onchain*
 
 **Enable (Railway Variables):**
 - `BOOA_ONCHAIN_MCP=1` — read tools: `get_balances`, `token_balance`, `read_contract`, `gas_price`, `get_wallet`.
-- `BOOA_ONCHAIN_WRITES=1` — write tools: `send`, `write_contract`, `swap`, `sign_message`, `sign_typed_data`, `x402_pay`. Off by default; reads stay available without it.
+- `BOOA_ONCHAIN_WRITES=1` — write tools: `send`, `write_contract`, `swap`, `sign_message`, `sign_typed_data`, `x402_pay`, `opensea_buy`. Off by default; reads stay available without it.
 - `OWS_PASSPHRASE` — set to a **scoped OWS API key** (`ows key create --wallet <name> --policy <id>`), never the raw vault password. The policy is your real spending limit.
 - `BOOA_SEND_ALLOWLIST` — comma-separated addresses (wallets or contracts) that writes may target. When set, `send`, `write_contract`, and `swap` refuse any other destination, whatever the agent is told.
 - `BOOA_MAX_TX_ETH` — per-transaction limit (the "işlem limiti"): max native ETH a single tx may move.
@@ -272,6 +272,7 @@ Once the wallet is linked, the agent can act onchain through the **booa-onchain*
 - `BOOA_SWAP_TOKEN_ALLOWLIST` — tokens the agent may swap INTO. Only native, USDC, WETH, and tokens listed here are buyable; everything else is refused. This is the honeypot guard — a scam token that lets you buy but never sell can never be acquired unless the operator explicitly trusts it.
 - `BOOA_MAX_SLIPPAGE_BPS` — max swap slippage in basis points (default 300 = 3%). Swaps requesting more are refused.
 - OpenSea (read/discovery): `OPENSEA_API_KEY` (free key) + `BOOA_OPENSEA_MCP=1` wires the hosted OpenSea MCP for search, floor prices, portfolio, activity, and trending. It never signs.
+- `BOOA_OPENSEA_REQUIRE_VERIFIED` — default `1`. `opensea_buy` refuses to buy from a collection that is not OpenSea-verified (scam/impersonation guard). The tool always fetches the listing from OpenSea, encodes the Seaport call itself, and **simulates it before signing** — a bad order, wrong encoding, or unaffordable price is refused, never broadcast. Buying is capped by the same per-tx / daily ETH limits. Get `order_hash` from the OpenSea search tools, then `opensea_buy(chain, order_hash)`.
 - Optional: `ETH_RPC` / `BASE_RPC` (custom RPCs).
 
 > **No warranty.** This is a self-hosted utility template. Trading, swaps, and wallet operations run on the operator's own wallet, keys, and funds, entirely at their own risk. Verify every token, contract, and NFT yourself before confirming. The full terms and license are being finalized.
