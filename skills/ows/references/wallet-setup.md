@@ -262,7 +262,7 @@ Transferring the 8004 token to the agent (the old "full handover" flow) does not
 
 Once the wallet is linked, the agent can act onchain through the **booa-onchain** MCP server (Ethereum + Base). It never holds a key — every signature is delegated to OWS.
 
-**Enable (Railway Variables):**
+**Enable (dashboard → Onchain & Trading card, or Railway Variables — the dashboard wins; API keys are Railway-only):**
 - `BOOA_ONCHAIN_MCP=1` — read tools: `get_balances`, `token_balance`, `read_contract`, `gas_price`, `get_wallet`.
 - `BOOA_ONCHAIN_WRITES=1` — write tools: `send`, `write_contract`, `swap`, `sign_message`, `sign_typed_data`, `x402_pay`, `opensea_buy`, `opensea_list`, `accept_offer`. Off by default; reads stay available without it.
 - `OWS_PASSPHRASE` — set to a **scoped OWS API key** (`ows key create --wallet <name> --policy <id>`), never the raw vault password. The policy is your real spending limit.

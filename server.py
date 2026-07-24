@@ -735,6 +735,11 @@ async def onchain_settings_get(request: Request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     cur = _read_onchain_settings()
     out = {k: cur.get(k, os.environ.get(k, "")) for k in ONCHAIN_KEYS}
+    # Mirror the runtime default: verified-only buying is ON unless explicitly
+    # disabled. Without this the checkbox renders unchecked and a plain Save
+    # would silently switch the scam guard off.
+    if out["BOOA_OPENSEA_REQUIRE_VERIFIED"] == "":
+        out["BOOA_OPENSEA_REQUIRE_VERIFIED"] = "1"
     out["OPENSEA_API_KEY_set"] = bool(os.environ.get("OPENSEA_API_KEY"))
     return JSONResponse(out)
 
@@ -755,7 +760,8 @@ async def onchain_settings_post(request: Request):
         pass
     refresh_mcp_config(HERMES_HOME)  # rebuild config.yaml mcp_servers from the new settings
     return JSONResponse({"ok": True, "note": "Saved. Limits and allowlists apply immediately. "
-                         "Enabling/disabling a server or changing the OpenSea key takes effect after you restart the gateway."})
+                         "The enable toggles (read tools, trading, OpenSea) take effect after you restart the gateway. "
+                         "API keys are set in Railway → Variables."})
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
