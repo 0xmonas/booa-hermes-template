@@ -124,7 +124,7 @@
     <hr style="border:none;border-top:1px solid var(--border);margin:2px 0;">
     <label><input type="checkbox" id="oc-BOOA_OPENSEA_MCP"> Enable OpenSea (search + trading)</label>
     <label><input type="checkbox" id="oc-BOOA_OPENSEA_REQUIRE_VERIFIED"> Only buy from OpenSea-verified collections (recommended)</label>
-    <label>OpenSea API key <span id="oc-key-status" class="text-muted"></span><br><input id="oc-OPENSEA_API_KEY" type="password" placeholder="leave blank to keep current" style="width:100%;font-family:monospace;"></label>
+    <div class="text-muted">OpenSea API key: <strong id="oc-key-status">checking…</strong> · API keys are never entered here — set <code>OPENSEA_API_KEY</code> (and <code>OPENROUTER_API_KEY</code>) in Railway → Variables; they sync on restart.</div>
   </div>
   <div class="flex gap-2 mt-2">
     <button onclick="saveOnchainSettings()" class="btn-sm">Save</button>
@@ -354,7 +354,7 @@ async function submitWalletSignature() {
   }
 }
 
-const OC_KEYS = ['BOOA_ONCHAIN_MCP','BOOA_ONCHAIN_WRITES','BOOA_MAX_TX_ETH','BOOA_DAILY_CAP_ETH','BOOA_SEND_ALLOWLIST','BOOA_SWAP_TOKEN_ALLOWLIST','BOOA_MAX_SLIPPAGE_BPS','BOOA_OPENSEA_MCP','BOOA_OPENSEA_REQUIRE_VERIFIED','OPENSEA_API_KEY'];
+const OC_KEYS = ['BOOA_ONCHAIN_MCP','BOOA_ONCHAIN_WRITES','BOOA_MAX_TX_ETH','BOOA_DAILY_CAP_ETH','BOOA_SEND_ALLOWLIST','BOOA_SWAP_TOKEN_ALLOWLIST','BOOA_MAX_SLIPPAGE_BPS','BOOA_OPENSEA_MCP','BOOA_OPENSEA_REQUIRE_VERIFIED'];
 const OC_BOOLS = ['BOOA_ONCHAIN_MCP','BOOA_ONCHAIN_WRITES','BOOA_OPENSEA_MCP','BOOA_OPENSEA_REQUIRE_VERIFIED'];
 const isOn = v => ['1','true','yes','on'].includes(String(v).toLowerCase());
 async function loadOnchainSettings() {
@@ -369,7 +369,7 @@ async function loadOnchainSettings() {
       else el.value = d[k] || '';
     }
     const ks = document.getElementById('oc-key-status');
-    if (ks) ks.textContent = d.OPENSEA_API_KEY_set ? '(a key is saved)' : '(none saved)';
+    if (ks) ks.textContent = d.OPENSEA_API_KEY_set ? 'set ✓' : 'not set';
   } catch (e) {}
 }
 async function saveOnchainSettings() {

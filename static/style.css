@@ -118,6 +118,16 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--fg);
 }
 
+input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0 8px 0 0;
+  padding: 0;
+  accent-color: var(--green);
+  vertical-align: -2px;
+  cursor: pointer;
+}
+
 input::placeholder, textarea::placeholder {
   color: var(--border);
 }

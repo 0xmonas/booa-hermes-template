@@ -673,12 +673,53 @@ def _qr_svg_datauri(data: str):
 
 
 # Operator-editable onchain/trading settings (override the same-named env vars).
+# Secrets are NOT here on purpose: API keys belong in Railway → Variables.
 ONCHAIN_KEYS = [
     "BOOA_ONCHAIN_MCP", "BOOA_ONCHAIN_WRITES", "BOOA_MAX_TX_ETH", "BOOA_DAILY_CAP_ETH",
     "BOOA_SEND_ALLOWLIST", "BOOA_SWAP_TOKEN_ALLOWLIST", "BOOA_MAX_SLIPPAGE_BPS",
-    "BOOA_OPENSEA_MCP", "BOOA_OPENSEA_REQUIRE_VERIFIED", "OPENSEA_API_KEY",
+    "BOOA_OPENSEA_MCP", "BOOA_OPENSEA_REQUIRE_VERIFIED",
 ]
 _ONCHAIN_PATH = os.path.join(HERMES_HOME, "onchain-settings.json")
+
+
+def _sync_secret_env_keys():
+    """Upsert secrets from the process env (Railway Variables) into HERMES_HOME/.env."""
+    env_path = Path(HERMES_HOME) / ".env"
+    if not env_path.exists():
+        return
+    try:
+        lines = env_path.read_text().splitlines()
+        changed = False
+        for key in ("OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN"):
+            val = os.environ.get(key)
+            if not val:
+                continue
+            line = f"{key}={val}"
+            for i, existing in enumerate(lines):
+                if existing.startswith(key + "="):
+                    if existing != line:
+                        lines[i] = line
+                        changed = True
+                    break
+            else:
+                lines.append(line)
+                changed = True
+        if changed:
+            env_path.write_text("\n".join(lines) + "\n")
+            print("[booa] synced secret keys from Railway env into .env", flush=True)
+    except OSError:
+        pass
+
+
+def _scrub_onchain_secret():
+    try:
+        p = Path(_ONCHAIN_PATH)
+        if p.exists():
+            d = json.loads(p.read_text())
+            if d.pop("OPENSEA_API_KEY", None) is not None:
+                p.write_text(json.dumps(d, indent=2))
+    except Exception:
+        pass
 
 
 def _read_onchain_settings() -> dict:
@@ -693,8 +734,8 @@ async def onchain_settings_get(request: Request):
     if not require_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     cur = _read_onchain_settings()
-    out = {k: cur.get(k, os.environ.get(k, "")) for k in ONCHAIN_KEYS if k != "OPENSEA_API_KEY"}
-    out["OPENSEA_API_KEY_set"] = bool(cur.get("OPENSEA_API_KEY") or os.environ.get("OPENSEA_API_KEY"))
+    out = {k: cur.get(k, os.environ.get(k, "")) for k in ONCHAIN_KEYS}
+    out["OPENSEA_API_KEY_set"] = bool(os.environ.get("OPENSEA_API_KEY"))
     return JSONResponse(out)
 
 
@@ -703,11 +744,9 @@ async def onchain_settings_post(request: Request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     form = await request.form()
     cur = _read_onchain_settings()
+    cur.pop("OPENSEA_API_KEY", None)  # secrets live in Railway env, never here
     for k in ONCHAIN_KEYS:
-        v = (form.get(k) or "").strip()
-        if k == "OPENSEA_API_KEY" and not v:
-            continue  # blank means "keep the existing key"
-        cur[k] = v
+        cur[k] = (form.get(k) or "").strip()
     with open(_ONCHAIN_PATH, "w") as f:
         json.dump(cur, f, indent=2)
     try:
@@ -768,6 +807,12 @@ async def lifespan(app):
         write_security_rules(HERMES_HOME)
         # Keep config.yaml mcp_servers in sync with the operator's onchain-settings.json.
         refresh_mcp_config(HERMES_HOME)
+        # Railway Variables are the source of truth for secrets: sync them into the
+        # Hermes .env on every boot, so a key set or rotated in Railway takes effect
+        # after a restart (there is deliberately no dashboard input for secrets).
+        _sync_secret_env_keys()
+        # Migration: secrets no longer live in onchain-settings.json.
+        _scrub_onchain_secret()
         tc = _token_chain_from_wizard()
         if tc is not None:
             try:
