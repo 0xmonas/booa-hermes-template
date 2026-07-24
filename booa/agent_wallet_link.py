@@ -96,10 +96,13 @@ def encode_blob(chain_id: int, agent_id: int, wallet: str, deadline: int, signat
 def _ows_sign_typed_data(wallet_name: str, typed: dict) -> Optional[str]:
     """Sign EIP-712 typed data with the agent's OWS wallet. Returns a 0x signature."""
     try:
+        # --chain takes a chain name (ethereum, …) or CAIP-2 id — "evm" is invalid
+        # and makes the CLI exit non-zero. The typed data's own chainId governs the
+        # digest; "ethereum" selects the EVM signing scheme for any EVM chain.
         proc = subprocess.run(
-            ["ows", "sign", "message", "--wallet", wallet_name, "--chain", "evm",
+            ["ows", "sign", "message", "--wallet", wallet_name, "--chain", "ethereum",
              "--message", "", "--typed-data", json.dumps(typed), "--json"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=60, env=os.environ.copy(),
         )
         if proc.returncode != 0:
             return None

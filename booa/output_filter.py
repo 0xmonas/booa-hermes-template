@@ -88,6 +88,14 @@ def operator_warning(hits: list[Hit]) -> str:
 
 
 
+# The Bridge deep-link is MADE to be shared: it carries the agent wallet's
+# setAgentWallet consent (address + EIP-712 signature + 1h deadline) that the
+# operator must open in a browser. It authorizes nothing beyond setting that
+# wallet on that agent, and only the NFT holder can submit it — so anything
+# inside the link is exempt from redaction. Secrets outside it still trigger.
+_BRIDGE_LINK_RE = re.compile(r"https://(?:www\.)?booa\.app/bridge\?link=[A-Za-z0-9%+/=\-_]+")
+
+
 def scan(
     text: str,
     *,
@@ -103,6 +111,9 @@ def scan(
         hits.extend(_scan_private_files(text, private_file_hashes))
     if deny_list:
         hits.extend(_scan_deny_list(text, deny_list))
+    allowed = [m.span() for m in _BRIDGE_LINK_RE.finditer(text)]
+    if allowed:
+        hits = [h for h in hits if not any(a0 <= h.span[0] and h.span[1] <= a1 for a0, a1 in allowed)]
     return hits
 
 
