@@ -44,7 +44,7 @@ async def fetch_booa_identity(token_id: int) -> dict:
 
 
 SKILL_URLS = {
-    "khora": {
+    "booa": {
         "SKILL.md": f"{BOOA_SKILLS_URL}/SKILL.md",
         "references/wallet-setup.md": f"{BOOA_SKILLS_URL}/references/wallet-setup.md",
     },

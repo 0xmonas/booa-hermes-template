@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import secrets
+import shutil
 import time
 from pathlib import Path
 
@@ -819,6 +820,19 @@ async def lifespan(app):
         _sync_secret_env_keys()
         # Migration: secrets no longer live in onchain-settings.json.
         _scrub_onchain_secret()
+        # Refresh OUR managed skills (booa, cobbee, bundled ows) on every boot so
+        # stale copies on old volumes get updated — e.g. pre-rebrand "khora" docs.
+        # Best-effort: offline boots keep whatever is on the volume. Skills the
+        # operator installed themselves are never touched.
+        try:
+            skills = await fetch_skills()
+            write_skills(HERMES_HOME, skills)
+            legacy = Path(HERMES_HOME) / "skills" / "khora"
+            if skills.get("booa") and legacy.is_dir():
+                shutil.rmtree(legacy, ignore_errors=True)
+                print("[booa] migrated legacy 'khora' skill to 'booa'", flush=True)
+        except Exception as exc:
+            print(f"[booa] skill refresh failed: {exc}", flush=True)
         tc = _token_chain_from_wizard()
         if tc is not None:
             try:
