@@ -712,6 +712,10 @@ async def lifespan(app):
     migrate_pairing_files(HERMES_HOME)
     if is_setup_complete(HERMES_HOME):
         install_output_filter_hook(HERMES_HOME)
+        # Refresh the security policy on every boot so existing deployments pick up
+        # security updates on the next restart/redeploy. Safe to overwrite: SECURITY.md
+        # is our static hardcoded policy, never operator data or the NFT-derived SOUL.
+        write_security_rules(HERMES_HOME)
         tc = _token_chain_from_wizard()
         if tc is not None:
             try:
