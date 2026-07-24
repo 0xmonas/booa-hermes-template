@@ -96,8 +96,29 @@ def encode_blob(chain_id: int, agent_id: int, wallet: str, deadline: int, signat
     return base64.b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
 
 
+_last_sign_error = ""
+OWS_KEY_FILE = os.environ.get("OWS_KEY_FILE") or "/data/.ows/agent-api-key.txt"
+
+
+def _sign_env() -> dict:
+    """Signing env: OWS needs a passphrase non-interactively. Fall back to the
+    API-key file the agent conventionally saves, so the dashboard route works
+    even when OWS_PASSPHRASE isn't set in the service environment."""
+    env = os.environ.copy()
+    if not env.get("OWS_PASSPHRASE"):
+        try:
+            with open(OWS_KEY_FILE) as f:
+                key = f.read().strip()
+            if key:
+                env["OWS_PASSPHRASE"] = key
+        except OSError:
+            pass
+    return env
+
+
 def _ows_sign_typed_data(wallet_name: str, typed: dict) -> Optional[str]:
     """Sign EIP-712 typed data with the agent's OWS wallet. Returns a 0x signature."""
+    global _last_sign_error
     try:
         # --chain takes a chain name (ethereum, …) or CAIP-2 id — "evm" is invalid
         # and makes the CLI exit non-zero. The typed data's own chainId governs the
@@ -105,14 +126,19 @@ def _ows_sign_typed_data(wallet_name: str, typed: dict) -> Optional[str]:
         proc = subprocess.run(
             ["ows", "sign", "message", "--wallet", wallet_name, "--chain", "ethereum",
              "--message", "", "--typed-data", json.dumps(typed), "--json"],
-            capture_output=True, text=True, timeout=60, env=os.environ.copy(),
+            capture_output=True, text=True, timeout=60, env=_sign_env(),
         )
         if proc.returncode != 0:
+            _last_sign_error = (proc.stderr or proc.stdout or "").strip()[-200:]
             return None
         out = json.loads(proc.stdout)
         sig = out.get("signature")
-        return sig if isinstance(sig, str) and sig.startswith("0x") else None
-    except (subprocess.SubprocessError, ValueError, FileNotFoundError):
+        if isinstance(sig, str) and sig.startswith("0x"):
+            return sig
+        _last_sign_error = f"unexpected output: {proc.stdout[:120]}"
+        return None
+    except (subprocess.SubprocessError, ValueError, FileNotFoundError) as exc:
+        _last_sign_error = str(exc)[:200]
         return None
 
 
@@ -140,7 +166,10 @@ def build_link_blob(
     typed = build_typed_data(chain_id, int(agent_id), wallet_address, owner, deadline)
     signature = _ows_sign_typed_data(wallet_name, typed)
     if not signature:
-        return {"ok": False, "error": "OWS could not sign. Is a wallet configured (ows wallet list)?"}
+        detail = f" ({_last_sign_error})" if _last_sign_error else ""
+        return {"ok": False, "error": f"OWS could not sign with wallet '{wallet_name}'{detail}. "
+                                      "Check: ows wallet list, and that the OWS API key is available "
+                                      f"(OWS_PASSPHRASE env or {OWS_KEY_FILE})."}
 
     blob = encode_blob(chain_id, int(agent_id), wallet_address, deadline, signature)
     return {

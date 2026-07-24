@@ -325,7 +325,7 @@ async function startWalletVerify() {
   const data = await res.json();
   const escaped = data.message.replace(/"/g, '\\"');
   const walletName = data.suggested_name || 'my-agent';
-  const cmd = `OWS_PASSPHRASE=$OWS_API_KEY ows sign message \\\n  --wallet ${walletName} --chain shape \\\n  --message "${escaped}"`;
+  const cmd = `OWS_PASSPHRASE=$OWS_API_KEY ows sign message \\\n  --wallet ${walletName} --chain ethereum \\\n  --message "${escaped}"`;
   document.getElementById('wallet-ows-command').value = cmd;
   document.getElementById('wallet-signature-input').value = '';
   document.getElementById('wallet-verify-result').textContent = '';
