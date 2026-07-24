@@ -381,6 +381,13 @@ def _swap_token_allowed(chain: str, token: str) -> bool:
 # simulation and never reaches the chain.
 OPENSEA_CHAIN = {"ethereum": "ethereum", "base": "base"}
 SEAPORT_16 = "0x0000000000000068F116a894984e2DB1123eB395"
+OPENSEA_CONDUIT = "0x1E0049783F008A0085193E00003D00cd54003c71"
+
+
+def _is_approved_for_all(chain: str, contract: str, owner: str, operator: str) -> bool:
+    data = "0x" + _selector("isApprovedForAll(address,address)").hex() + abi_encode(
+        ["address", "address"], [to_checksum_address(owner), to_checksum_address(operator)]).hex()
+    return int(_eth_call(chain, contract, data), 16) == 1
 
 
 def _opensea_api(path: str, method: str = "GET", body: Optional[dict] = None) -> dict:
@@ -741,6 +748,53 @@ if _writes_enabled():
             return {"ok": True, "listed": True, "nft": f"{to_checksum_address(contract)} #{token_id}",
                     "price_eth": str(price_eth), "onchain_steps": done,
                     "order_hash": order.get("order_hash") if isinstance(order, dict) else None}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    @mcp.tool()
+    def accept_offer(chain: str, order_hash: str, contract: str, token_id: str, protocol_address: str = SEAPORT_16, confirm: bool = False) -> dict:
+        """Sell an NFT you own by accepting an existing OpenSea offer/bid. Get order_hash from the OpenSea offer tools. Approves the collection to OpenSea's conduit if needed, then fulfills the offer via OWS (you receive the offer amount, the buyer gets the NFT). Simulates before signing. Previews unless confirm=True. Verify the offer amount first — accepting a lowball offer sells your NFT cheap."""
+        w = _agent_wallet()
+        if not w.get("address"):
+            return {"ok": False, "error": "No agent wallet set."}
+        if chain not in OPENSEA_CHAIN:
+            return {"ok": False, "error": f"OpenSea offers are not wired for {chain}."}
+        try:
+            owner = to_checksum_address(w["address"])
+            nft_c = to_checksum_address(contract)
+            fd = _opensea_api("/offers/fulfillment_data", "POST", {
+                "offer": {"hash": order_hash, "chain": OPENSEA_CHAIN[chain], "protocol_address": to_checksum_address(protocol_address)},
+                "fulfiller": {"address": owner},
+                "consideration": {"asset_contract_address": nft_c, "token_id": str(token_id)},
+            })
+            tx = fd["fulfillment_data"]["transaction"]
+            to = to_checksum_address(tx["to"])
+            value = int(tx["value"])
+            data = _encode_tx_calldata(tx["function"], tx["input_data"], tx.get("calldata_suffix", ""))
+            approved = _is_approved_for_all(chain, nft_c, owner, OPENSEA_CONDUIT)
+            sim = _simulate(chain, owner, to, value, data) if approved else None
+            preview = {
+                "action": "accept_offer", "chain": chain, "nft": f"{nft_c} #{token_id}",
+                "offer_hash": order_hash, "needs_approval": not approved,
+                "simulation": ("ok" if sim is None else f"would revert: {sim[:140]}") if approved else "runs after approval",
+            }
+            if not confirm:
+                return {"ok": True, "preview": preview, "note": "Nothing sold. Verify the offer amount you are accepting, then confirm=true to approve (if needed) and accept."}
+            done = []
+            if not approved:
+                appr = "0x" + _selector("setApprovalForAll(address,bool)").hex() + abi_encode(["address", "bool"], [OPENSEA_CONDUIT, True]).hex()
+                u, _ = _build_unsigned_1559(chain, owner, nft_c, 0, appr)
+                ath = _ows_send(chain, w["name"], u)
+                _wait_receipt(chain, ath)
+                done.append({"setApprovalForAll": ath})
+            sim = _simulate(chain, owner, to, value, data)  # final gate, post-approval
+            if sim is not None:
+                return {"ok": False, "error": f"Simulation failed, not selling: {sim[:200]}", "onchain_steps": done}
+            unsigned, _ = _build_unsigned_1559(chain, owner, to, value, data)
+            txh = _ows_send(chain, w["name"], unsigned)
+            done.append({"fulfill": txh})
+            return {"ok": True, "sold": True, "nft": f"{nft_c} #{token_id}", "onchain_steps": done,
+                    "tx": txh, "explorer": f"{CHAINS[chain]['explorer']}/tx/{txh}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
