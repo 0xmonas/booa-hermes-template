@@ -106,6 +106,32 @@
   </div>
 </div>
 
+<div class="card" id="onchain-section">
+  <h3>Onchain &amp; Trading</h3>
+  <div class="info-box text-xs mb-2">
+    Give your agent onchain tools. <strong>Off by default.</strong> Everything runs on your own OWS wallet and funds, at your own risk (see <a href="https://github.com/0xmonas/booa-hermes-template/blob/main/DISCLAIMER.md" target="_blank">DISCLAIMER</a>). Limits and allowlists apply instantly; enabling a server or changing the OpenSea key takes effect after a gateway restart.
+  </div>
+  <div class="text-xs" style="display:flex;flex-direction:column;gap:8px;">
+    <label><input type="checkbox" id="oc-BOOA_ONCHAIN_MCP"> Enable onchain read tools (balances, prices, portfolio, OpenSea search)</label>
+    <label><input type="checkbox" id="oc-BOOA_ONCHAIN_WRITES"> <strong>Enable trading &amp; wallet actions</strong> (send, swap, buy/sell NFTs, x402) — moves real funds</label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <label style="flex:1;min-width:130px;">Per-tx ETH cap<br><input id="oc-BOOA_MAX_TX_ETH" placeholder="e.g. 0.05" style="width:100%;"></label>
+      <label style="flex:1;min-width:130px;">Daily ETH cap<br><input id="oc-BOOA_DAILY_CAP_ETH" placeholder="e.g. 0.2" style="width:100%;"></label>
+      <label style="flex:1;min-width:110px;">Max slippage (bps)<br><input id="oc-BOOA_MAX_SLIPPAGE_BPS" placeholder="300" style="width:100%;"></label>
+    </div>
+    <label>Send allowlist — addresses the agent may pay (comma-separated)<br><input id="oc-BOOA_SEND_ALLOWLIST" placeholder="0x…, 0x…" style="width:100%;font-family:monospace;"></label>
+    <label>Swap token allowlist — tokens it may buy (comma-separated)<br><input id="oc-BOOA_SWAP_TOKEN_ALLOWLIST" placeholder="0x…  (native, USDC, WETH always allowed)" style="width:100%;font-family:monospace;"></label>
+    <hr style="border:none;border-top:1px solid var(--border);margin:2px 0;">
+    <label><input type="checkbox" id="oc-BOOA_OPENSEA_MCP"> Enable OpenSea (search + trading)</label>
+    <label><input type="checkbox" id="oc-BOOA_OPENSEA_REQUIRE_VERIFIED"> Only buy from OpenSea-verified collections (recommended)</label>
+    <label>OpenSea API key <span id="oc-key-status" class="text-muted"></span><br><input id="oc-OPENSEA_API_KEY" type="password" placeholder="leave blank to keep current" style="width:100%;font-family:monospace;"></label>
+  </div>
+  <div class="flex gap-2 mt-2">
+    <button onclick="saveOnchainSettings()" class="btn-sm">Save</button>
+    <span id="oc-result" class="text-xs text-muted"></span>
+  </div>
+</div>
+
 <div class="card" id="pairing-section">
   <h3>Telegram Pairing</h3>
   <div id="pairing-connected" style="display:none;">
@@ -328,9 +354,45 @@ async function submitWalletSignature() {
   }
 }
 
+const OC_KEYS = ['BOOA_ONCHAIN_MCP','BOOA_ONCHAIN_WRITES','BOOA_MAX_TX_ETH','BOOA_DAILY_CAP_ETH','BOOA_SEND_ALLOWLIST','BOOA_SWAP_TOKEN_ALLOWLIST','BOOA_MAX_SLIPPAGE_BPS','BOOA_OPENSEA_MCP','BOOA_OPENSEA_REQUIRE_VERIFIED','OPENSEA_API_KEY'];
+const OC_BOOLS = ['BOOA_ONCHAIN_MCP','BOOA_ONCHAIN_WRITES','BOOA_OPENSEA_MCP','BOOA_OPENSEA_REQUIRE_VERIFIED'];
+const isOn = v => ['1','true','yes','on'].includes(String(v).toLowerCase());
+async function loadOnchainSettings() {
+  try {
+    const res = await fetch('/api/onchain-settings');
+    if (!res.ok) return;
+    const d = await res.json();
+    for (const k of OC_KEYS) {
+      const el = document.getElementById('oc-'+k);
+      if (!el) continue;
+      if (OC_BOOLS.includes(k)) el.checked = isOn(d[k]);
+      else el.value = d[k] || '';
+    }
+    const ks = document.getElementById('oc-key-status');
+    if (ks) ks.textContent = d.OPENSEA_API_KEY_set ? '(a key is saved)' : '(none saved)';
+  } catch (e) {}
+}
+async function saveOnchainSettings() {
+  const result = document.getElementById('oc-result');
+  result.textContent = 'Saving…';
+  const fd = new FormData();
+  for (const k of OC_KEYS) {
+    const el = document.getElementById('oc-'+k);
+    if (!el) continue;
+    fd.append(k, OC_BOOLS.includes(k) ? (el.checked ? '1' : '0') : el.value.trim());
+  }
+  try {
+    const res = await fetch('/api/onchain-settings', { method: 'POST', body: fd });
+    const d = await res.json();
+    result.textContent = res.ok ? (d.note || 'Saved.') : ('Failed: ' + (d.error || 'unknown'));
+    if (res.ok) loadOnchainSettings();
+  } catch (e) { result.textContent = 'Request failed.'; }
+}
+
 setInterval(() => { checkPairing(); checkErrors(); renderWalletStatus(); }, 3000);
 checkPairing();
 checkErrors();
 renderWalletStatus();
+loadOnchainSettings();
 </script>
 {% endblock %}

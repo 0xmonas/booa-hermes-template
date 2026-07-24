@@ -23,6 +23,7 @@ from booa.writer import (
     write_user_md, write_seed_memory, write_skills, write_config,
     generate_user_md, mark_setup_complete, is_setup_complete,
     write_security_rules, install_output_filter_hook, migrate_pairing_files,
+    refresh_mcp_config,
 )
 from booa import wallet_status
 from booa import agent_wallet_link
@@ -671,6 +672,53 @@ def _qr_svg_datauri(data: str):
         return None
 
 
+# Operator-editable onchain/trading settings (override the same-named env vars).
+ONCHAIN_KEYS = [
+    "BOOA_ONCHAIN_MCP", "BOOA_ONCHAIN_WRITES", "BOOA_MAX_TX_ETH", "BOOA_DAILY_CAP_ETH",
+    "BOOA_SEND_ALLOWLIST", "BOOA_SWAP_TOKEN_ALLOWLIST", "BOOA_MAX_SLIPPAGE_BPS",
+    "BOOA_OPENSEA_MCP", "BOOA_OPENSEA_REQUIRE_VERIFIED", "OPENSEA_API_KEY",
+]
+_ONCHAIN_PATH = os.path.join(HERMES_HOME, "onchain-settings.json")
+
+
+def _read_onchain_settings() -> dict:
+    try:
+        with open(_ONCHAIN_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+async def onchain_settings_get(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    cur = _read_onchain_settings()
+    out = {k: cur.get(k, os.environ.get(k, "")) for k in ONCHAIN_KEYS if k != "OPENSEA_API_KEY"}
+    out["OPENSEA_API_KEY_set"] = bool(cur.get("OPENSEA_API_KEY") or os.environ.get("OPENSEA_API_KEY"))
+    return JSONResponse(out)
+
+
+async def onchain_settings_post(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    form = await request.form()
+    cur = _read_onchain_settings()
+    for k in ONCHAIN_KEYS:
+        v = (form.get(k) or "").strip()
+        if k == "OPENSEA_API_KEY" and not v:
+            continue  # blank means "keep the existing key"
+        cur[k] = v
+    with open(_ONCHAIN_PATH, "w") as f:
+        json.dump(cur, f, indent=2)
+    try:
+        os.chmod(_ONCHAIN_PATH, 0o600)
+    except OSError:
+        pass
+    refresh_mcp_config(HERMES_HOME)  # rebuild config.yaml mcp_servers from the new settings
+    return JSONResponse({"ok": True, "note": "Saved. Limits and allowlists apply immediately. "
+                         "Enabling/disabling a server or changing the OpenSea key takes effect after you restart the gateway."})
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 
 routes = [
@@ -692,6 +740,8 @@ routes = [
     Route("/logs/stream", logs_stream),
     Route("/settings", settings_page),
     Route("/settings/reset", reset_wizard, methods=["POST"]),
+    Route("/api/onchain-settings", onchain_settings_get),
+    Route("/api/onchain-settings", onchain_settings_post, methods=["POST"]),
     Route("/download", download_data),
     Route("/gateway/errors", gateway_errors),
     Route("/pairing", pairing_list),
@@ -716,6 +766,8 @@ async def lifespan(app):
         # security updates on the next restart/redeploy. Safe to overwrite: SECURITY.md
         # is our static hardcoded policy, never operator data or the NFT-derived SOUL.
         write_security_rules(HERMES_HOME)
+        # Keep config.yaml mcp_servers in sync with the operator's onchain-settings.json.
+        refresh_mcp_config(HERMES_HOME)
         tc = _token_chain_from_wizard()
         if tc is not None:
             try:

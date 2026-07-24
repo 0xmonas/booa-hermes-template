@@ -34,6 +34,21 @@ OWS_BIN = os.environ.get("OWS_BIN") or "ows"
 
 HERMES_HOME = os.environ.get("HERMES_HOME", "/data/hermes")
 
+
+def _settings() -> dict:
+    """Operator-set onchain settings (dashboard-written), overriding env. Read live per call
+    so limit/allowlist/slippage changes take effect immediately, without a restart."""
+    try:
+        with open(os.path.join(HERMES_HOME, "onchain-settings.json")) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _cfg(key: str, default: str = "") -> str:
+    v = _settings().get(key)
+    return str(v) if v not in (None, "") else os.environ.get(key, default)
+
 CHAINS: dict[str, dict] = {
     "ethereum": {
         "id": 1,
@@ -224,7 +239,7 @@ def gas_price(chain: str = "ethereum") -> dict:
 # backstops: the preview step and a refusal of unlimited ERC-20 approvals.
 
 def _writes_enabled() -> bool:
-    return os.environ.get("BOOA_ONCHAIN_WRITES", "").lower() in ("1", "true", "yes")
+    return _cfg("BOOA_ONCHAIN_WRITES").lower() in ("1", "true", "yes")
 
 
 def _fees(chain: str) -> tuple[int, int]:
@@ -297,12 +312,12 @@ _SPEND_LEDGER = os.path.join(HERMES_HOME, "onchain-spend.json")
 
 
 def _allowlist() -> set:
-    return {a.strip().lower() for a in os.environ.get("BOOA_SEND_ALLOWLIST", "").split(",") if a.strip()}
+    return {a.strip().lower() for a in _cfg("BOOA_SEND_ALLOWLIST").split(",") if a.strip()}
 
 
 def _cap(name: str) -> Decimal:
     try:
-        return Decimal(os.environ.get(name, "0") or "0")
+        return Decimal(_cfg(name, "0") or "0")
     except Exception:
         return Decimal(0)
 
@@ -370,7 +385,7 @@ def _swap_token_allowed(chain: str, token: str) -> bool:
     if t == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee":  # native ETH sentinel
         return True
     safe = {a.lower() for a in TOKENS.get(chain, {}).values()}
-    allow = {a.strip().lower() for a in os.environ.get("BOOA_SWAP_TOKEN_ALLOWLIST", "").split(",") if a.strip()}
+    allow = {a.strip().lower() for a in _cfg("BOOA_SWAP_TOKEN_ALLOWLIST").split(",") if a.strip()}
     return t in safe or t in allow
 
 
@@ -391,7 +406,7 @@ def _is_approved_for_all(chain: str, contract: str, owner: str, operator: str) -
 
 
 def _opensea_api(path: str, method: str = "GET", body: Optional[dict] = None) -> dict:
-    key = os.environ.get("OPENSEA_API_KEY")
+    key = _cfg("OPENSEA_API_KEY")
     if not key:
         raise RuntimeError("OPENSEA_API_KEY not set — OpenSea actions are unavailable.")
     r = httpx.request(method, "https://api.opensea.io/api/v2" + path,
@@ -486,7 +501,7 @@ if _writes_enabled():
                 value = int(Decimal(amount) * (10 ** 18))
                 data, target = "0x", to
                 summary = f"{amount} ETH → {to} on {chain}"
-                cap = os.environ.get("BOOA_MAX_TX_ETH", "0") or "0"
+                cap = _cfg("BOOA_MAX_TX_ETH", "0") or "0"
                 if Decimal(cap) > 0 and Decimal(amount) > Decimal(cap):
                     return {"ok": False, "error": f"Native amount {amount} exceeds BOOA_MAX_TX_ETH cap ({cap}). Raise the cap to proceed."}
             native_eth = Decimal(0) if token else Decimal(amount)
@@ -544,7 +559,7 @@ if _writes_enabled():
             is_native = sell.lower() == ETH_SENTINEL.lower()
             dec = 18 if is_native else _token_decimals(chain, sell)
             amount_in = int(Decimal(sell_amount) * (10 ** dec))
-            max_slip = int(os.environ.get("BOOA_MAX_SLIPPAGE_BPS", "300") or "300")
+            max_slip = int(_cfg("BOOA_MAX_SLIPPAGE_BPS", "300") or "300")
             if int(slippage_bps) > max_slip:
                 return {"ok": False, "error": f"Slippage {slippage_bps} bps exceeds the cap {max_slip} (BOOA_MAX_SLIPPAGE_BPS)."}
             if not _swap_token_allowed(chain, buy):
@@ -665,7 +680,7 @@ if _writes_enabled():
             nft = f"{nft_contract} #{params.get('offerIdentifier', '?')}"
 
             # verified-collection guard (scam / impersonation protection)
-            require_verified = os.environ.get("BOOA_OPENSEA_REQUIRE_VERIFIED", "1").lower() in ("1", "true", "yes")
+            require_verified = _cfg("BOOA_OPENSEA_REQUIRE_VERIFIED", "1").lower() in ("1", "true", "yes")
             ver = _opensea_collection_verified(chain, nft_contract) if nft_contract else None
             verified, slug = (ver[0], ver[1]) if ver else (None, None)
             if require_verified and verified is not True:

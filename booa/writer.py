@@ -1,5 +1,6 @@
 """Write Hermes identity files to HERMES_HOME."""
 
+import json
 import os
 import shutil
 import sys
@@ -204,51 +205,9 @@ def write_config(hermes_home: str, provider: str, api_key: str, model: str,
         },
     }
 
-    # Optional onchain read tools (booa-onchain MCP). Gated behind an env flag so
-    # the live fleet is untouched until it's proven on a real deploy — set
-    # BOOA_ONCHAIN_MCP=1 in Railway Variables to enable. A failed MCP server
-    # degrades gracefully (its tools go missing); it never blocks the agent.
-    mcp_servers = {}
-    # booa-onchain (OWS-signed reads + gated writes). Off unless BOOA_ONCHAIN_MCP=1,
-    # so the live fleet is untouched until proven. A failed MCP server degrades
-    # gracefully (its tools go missing); it never blocks the agent.
-    if os.environ.get("BOOA_ONCHAIN_MCP", "").lower() in ("1", "true", "yes"):
-        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        mcp_env = {"PYTHONPATH": repo_root, "HERMES_HOME": hermes_home}
-        # Pass through what the onchain server needs even if the MCP launcher
-        # does not inherit the parent env: PATH (to find `ows`), RPC overrides,
-        # the write gate, the OWS auth token, and the OpenSea key (for OWS-signed
-        # OpenSea actions). Use a scoped OWS API key for OWS_PASSPHRASE — never
-        # the raw vault password.
-        for _k in ("PATH", "OWS_PASSPHRASE", "OWS_BIN", "OWS_WALLET",
-                   "BOOA_ONCHAIN_WRITES", "BOOA_MAX_TX_ETH", "BOOA_DAILY_CAP_ETH",
-                   "BOOA_SEND_ALLOWLIST", "BOOA_SWAP_TOKEN_ALLOWLIST", "BOOA_MAX_SLIPPAGE_BPS",
-                   "ETH_RPC", "BASE_RPC", "OPENSEA_API_KEY", "BOOA_OPENSEA_REQUIRE_VERIFIED"):
-            _v = os.environ.get(_k)
-            if _v:
-                mcp_env[_k] = _v
-        mcp_servers["booa-onchain"] = {
-            "command": sys.executable or "python",
-            "args": ["-m", "booa.onchain_mcp"],
-            "enabled": True,
-            "connect_timeout": 20,
-            "env": mcp_env,
-        }
-
-    # OpenSea MCP (hosted, read/discovery + tx-data tools). Never signs — it only
-    # returns data and unsigned transactions; execution goes through booa-onchain
-    # (OWS). Needs a free OpenSea API key. Gated so it stays opt-in.
-    _os_key = os.environ.get("OPENSEA_API_KEY")
-    if _os_key and os.environ.get("BOOA_OPENSEA_MCP", "").lower() in ("1", "true", "yes"):
-        mcp_servers["opensea"] = {
-            "url": "https://mcp.opensea.io/mcp",
-            "headers": {"X-API-KEY": _os_key},
-            "enabled": True,
-            "connect_timeout": 20,
-        }
-
-    if mcp_servers:
-        config["mcp_servers"] = mcp_servers
+    # mcp_servers is added by refresh_mcp_config() after the base config is written,
+    # so it can be re-derived from onchain-settings.json (dashboard-editable) at any
+    # time — on setup, on dashboard save, and on boot.
 
     if telegram_token:
         config["gateway"] = {
@@ -277,6 +236,68 @@ def write_config(hermes_home: str, provider: str, api_key: str, model: str,
         f.write("\n".join(env_lines) + "\n")
 
     config_path = os.path.join(hermes_home, "config.yaml")
+    with open(config_path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False)
+
+    refresh_mcp_config(hermes_home)
+
+
+def _onchain_cfg(hermes_home: str, key: str, default: str = "") -> str:
+    """Read an onchain setting: dashboard-written onchain-settings.json first, then env, then default."""
+    try:
+        with open(os.path.join(hermes_home, "onchain-settings.json")) as f:
+            v = json.load(f).get(key)
+            if v not in (None, ""):
+                return str(v)
+    except Exception:
+        pass
+    return os.environ.get(key, default)
+
+
+def refresh_mcp_config(hermes_home: str):
+    """(Re)build the config.yaml mcp_servers block from onchain-settings.json (+ env fallback).
+    Called on setup, on dashboard save, and on boot. Enabling/disabling a server or changing the
+    OpenSea key needs a gateway restart to take effect; the live limits/allowlists do not (the
+    onchain server reads those from onchain-settings.json per call)."""
+    config_path = os.path.join(hermes_home, "config.yaml")
+    if not os.path.exists(config_path):
+        return
+    with open(config_path) as f:
+        config = yaml.safe_load(f) or {}
+
+    def _on(key):
+        return _onchain_cfg(hermes_home, key).lower() in ("1", "true", "yes")
+
+    mcp_servers = {}
+    if _on("BOOA_ONCHAIN_MCP"):
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        mcp_env = {"PYTHONPATH": repo_root, "HERMES_HOME": hermes_home}
+        # Only infra/secret/RPC vars go through the env — the BOOA_* limits and the
+        # OpenSea key are read live from onchain-settings.json by the server itself.
+        for _k in ("PATH", "OWS_PASSPHRASE", "OWS_BIN", "OWS_WALLET", "ETH_RPC", "BASE_RPC"):
+            _v = os.environ.get(_k)
+            if _v:
+                mcp_env[_k] = _v
+        mcp_servers["booa-onchain"] = {
+            "command": sys.executable or "python",
+            "args": ["-m", "booa.onchain_mcp"],
+            "enabled": True,
+            "connect_timeout": 20,
+            "env": mcp_env,
+        }
+    _os_key = _onchain_cfg(hermes_home, "OPENSEA_API_KEY")
+    if _os_key and _on("BOOA_OPENSEA_MCP"):
+        mcp_servers["opensea"] = {
+            "url": "https://mcp.opensea.io/mcp",
+            "headers": {"X-API-KEY": _os_key},
+            "enabled": True,
+            "connect_timeout": 20,
+        }
+
+    if mcp_servers:
+        config["mcp_servers"] = mcp_servers
+    else:
+        config.pop("mcp_servers", None)
     with open(config_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
 
