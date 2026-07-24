@@ -246,12 +246,12 @@ function confirmExport() {
 }
 
 const WALLET_STATES = {
-  'no-wallet':  { emoji: '⚠',  text: 'No wallet configured. Tell your agent "/ows" to set one up.', canVerify: false, canLink: false, verifyLabel: 'Verify Wallet' },
+  'no-wallet':  { emoji: '⚠',  text: 'No wallet yet. Open Telegram and tell your agent: "set up my wallet". It creates an encrypted OWS wallet and this card updates automatically.', canVerify: false, canLink: false, verifyLabel: 'Verify Wallet' },
   'unverified': { emoji: '🟡', text: 'Wallet ready. Generate a link code to set it onchain — signing the code also proves you control the wallet.', canVerify: true, canLink: true, verifyLabel: 'Verify Wallet' },
   'verified':   { emoji: '🟠', text: 'Wallet verified but not linked yet. Generate the link code to set this wallet onchain via booa.app/bridge.', canVerify: true, canLink: true, verifyLabel: 'Verify another wallet' },
   'linked':     { emoji: '✅', text: 'Wallet verified and linked as the agent wallet onchain.', canVerify: true, canLink: true, verifyLabel: 'Verify a different wallet' },
   'orphan':     { emoji: '🔴', text: 'ORPHAN — NFT ownership has moved to another wallet.', canVerify: true, canLink: false, verifyLabel: 'Verify the new owner wallet' },
-  'unknown':    { emoji: '❓', text: 'Status unknown (BOOA API unreachable). Click Refresh to retry.', canVerify: false, canLink: false, verifyLabel: 'Verify Wallet' },
+  'unknown':    { emoji: '❓', text: 'Status unknown (BOOA API unreachable). Click Refresh to retry. Wallet setup happens in Telegram: tell your agent "set up my wallet", then "link my wallet" to register it onchain.', canVerify: false, canLink: false, verifyLabel: 'Verify Wallet' },
 };
 
 async function renderWalletStatus() {
