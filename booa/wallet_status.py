@@ -167,15 +167,21 @@ def _read_local_wallet_info(hermes_home: str) -> Optional[dict]:
     return {"address": address, "name": name}
 
 
-def fetch_booa_registry(chain_id: int, token_id: int, timeout: float = 8.0) -> Optional[dict]:
+def fetch_booa_registry(chain_id: int, token_id: int, timeout: float = 20.0) -> Optional[dict]:
+    # A cold registry lookup does a full onchain scan server-side and can take
+    # several seconds; the follow-up attempt hits the warm path in <1s.
     url = f"{BOOA_API}/agent-registry/{chain_id}/{token_id}"
-    try:
-        r = httpx.get(url, timeout=timeout, follow_redirects=True)
-        if r.status_code != 200:
-            return None
-        return r.json()
-    except (httpx.HTTPError, ValueError):
-        return None
+    for attempt in range(2):
+        try:
+            r = httpx.get(url, timeout=timeout, follow_redirects=True)
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code == 404:
+                return None  # definitive answer, don't retry
+        except (httpx.HTTPError, ValueError) as exc:
+            if attempt == 1:
+                print(f"[booa] registry fetch failed for {chain_id}/{token_id}: {exc}", flush=True)
+    return None
 
 
 def compute_state(hermes_home: str, chain_id: int, token_id: int) -> WalletState:
