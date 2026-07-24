@@ -686,6 +686,64 @@ if _writes_enabled():
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    @mcp.tool()
+    def opensea_list(chain: str, contract: str, token_id: str, price_eth: str, confirm: bool = False) -> dict:
+        """List an NFT you own for sale on OpenSea at price_eth (native ETH). Fetches the order from OpenSea, runs any approval it requires (approving the collection to OpenSea's conduit) via OWS, signs the Seaport order with OWS, and publishes it. Previews unless confirm=True. This SELLS your NFT at the price you set — a too-low price can be bought instantly, so set it carefully."""
+        w = _agent_wallet()
+        if not w.get("address"):
+            return {"ok": False, "error": "No agent wallet set."}
+        if chain not in OPENSEA_CHAIN:
+            return {"ok": False, "error": f"OpenSea listing is not wired for {chain}."}
+        try:
+            owner = to_checksum_address(w["address"])
+            price_wei = int(Decimal(price_eth) * (10 ** 18))
+            actions = _opensea_api("/listings/actions", "POST", {
+                "address": owner,
+                "items": [{"chain": OPENSEA_CHAIN[chain], "contract": to_checksum_address(contract),
+                           "token_id": str(token_id), "quantity": 1,
+                           "price": {"amount": str(price_wei), "currency": "0x0000000000000000000000000000000000000000"}}],
+                "use_creator_fee": True,
+            })
+            tx_steps, sign_msg = [], None
+            for s in actions.get("steps", []):
+                for name, action in s.items():
+                    if not isinstance(action, dict):
+                        continue
+                    if "transaction" in action:
+                        t = action["transaction"]
+                        unwrap = lambda x: x["value"] if isinstance(x, dict) else x
+                        tx_steps.append({"name": name, "to": to_checksum_address(unwrap(t["to"])),
+                                         "data": unwrap(t["data"]), "value": int(unwrap(t.get("value")) or 0)})
+                    if "signatureRequest" in action:
+                        sign_msg = action["signatureRequest"]["message"]
+            if not sign_msg:
+                return {"ok": False, "error": "OpenSea returned no order to sign for this item."}
+            typed = json.loads(sign_msg) if isinstance(sign_msg, str) else sign_msg
+            proto = typed.get("domain", {}).get("verifyingContract", SEAPORT_16)
+            preview = {"action": "opensea_list", "chain": chain,
+                       "nft": f"{to_checksum_address(contract)} #{token_id}", "price_eth": str(price_eth),
+                       "onchain_steps": [x["name"] for x in tx_steps],
+                       "approves_collection_to_conduit": any("approval" in x["name"].lower() for x in tx_steps)}
+            if not confirm:
+                return {"ok": True, "preview": preview, "note": "Nothing listed. This SELLS your NFT at this price — show it to the operator, then confirm=true to approve (if needed), sign, and publish."}
+            done = []
+            for x in tx_steps:  # approval / cancel — ready calldata, OWS-signed
+                unsigned, _ = _build_unsigned_1559(chain, owner, x["to"], x["value"], x["data"])
+                txh = _ows_send(chain, w["name"], unsigned)
+                _wait_receipt(chain, txh)
+                done.append({x["name"]: txh})
+            sig = _ows_sign_message(w["name"], chain, typed_data=json.dumps(typed))
+            msg = typed["message"]
+            params = {**msg, "totalOriginalConsiderationItems": len(msg.get("consideration", []))}
+            res = _opensea_api(f"/orders/{OPENSEA_CHAIN[chain]}/seaport/listings", "POST",
+                               {"parameters": params, "signature": sig, "protocol_address": proto})
+            order = res.get("order", res)
+            return {"ok": True, "listed": True, "nft": f"{to_checksum_address(contract)} #{token_id}",
+                    "price_eth": str(price_eth), "onchain_steps": done,
+                    "order_hash": order.get("order_hash") if isinstance(order, dict) else None}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
 
 if __name__ == "__main__":
     mcp.run()
