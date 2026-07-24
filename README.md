@@ -82,8 +82,15 @@ Your agent can:
 |----------|----------|-------------|
 | `ADMIN_USERNAME` | Yes | Dashboard login username |
 | `ADMIN_PASSWORD` | Yes | Dashboard login password |
+| `OPENROUTER_API_KEY` | No | Model API key. The wizard asks for it once; set it here to replace or rotate it later — it syncs into the agent's config on every restart |
+| `TELEGRAM_BOT_TOKEN` | No | Same: set here to rotate the bot token after setup |
+| `OPENSEA_API_KEY` | No | Enables OpenSea search + trading tools (free key: docs.opensea.io/reference/api-keys) |
+| `BOOA_ONCHAIN_MCP`, `BOOA_ONCHAIN_WRITES`, `BOOA_OPENSEA_MCP` | No | Enable onchain read tools / trading + wallet actions / OpenSea. Also settable from the dashboard's Onchain & Trading card |
+| `BOOA_MAX_TX_ETH`, `BOOA_DAILY_CAP_ETH`, `BOOA_SEND_ALLOWLIST`, `BOOA_SWAP_TOKEN_ALLOWLIST`, `BOOA_MAX_SLIPPAGE_BPS`, `BOOA_OPENSEA_REQUIRE_VERIFIED` | No | Trading guardrails — per-tx and daily ETH caps, destination and token allowlists, slippage cap, verified-only buying. Dashboard values win over env |
+| `OWS_PASSPHRASE` | No | Scoped OWS API key for autonomous signing (never the vault password) |
+| `ETH_RPC`, `BASE_RPC` | No | Custom RPC endpoints |
 
-Everything else is configured through the web dashboard.
+API keys and secrets are set here (Railway → Variables), never in the dashboard. Everything else is configured through the web dashboard.
 
 ## Security
 
