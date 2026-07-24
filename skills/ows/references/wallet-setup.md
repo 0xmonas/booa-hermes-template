@@ -269,7 +269,12 @@ Once the wallet is linked, the agent can act onchain through the **booa-onchain*
 - `BOOA_SEND_ALLOWLIST` — comma-separated addresses (wallets or contracts) that writes may target. When set, `send`, `write_contract`, and `swap` refuse any other destination, whatever the agent is told.
 - `BOOA_MAX_TX_ETH` — per-transaction limit (the "işlem limiti"): max native ETH a single tx may move.
 - `BOOA_DAILY_CAP_ETH` — general limit: max native ETH across a rolling day, tracked in a ledger so recurring jobs cannot drain past it.
+- `BOOA_SWAP_TOKEN_ALLOWLIST` — tokens the agent may swap INTO. Only native, USDC, WETH, and tokens listed here are buyable; everything else is refused. This is the honeypot guard — a scam token that lets you buy but never sell can never be acquired unless the operator explicitly trusts it.
+- `BOOA_MAX_SLIPPAGE_BPS` — max swap slippage in basis points (default 300 = 3%). Swaps requesting more are refused.
+- OpenSea (read/discovery): `OPENSEA_API_KEY` (free key) + `BOOA_OPENSEA_MCP=1` wires the hosted OpenSea MCP for search, floor prices, portfolio, activity, and trending. It never signs.
 - Optional: `ETH_RPC` / `BASE_RPC` (custom RPCs).
+
+> **No warranty.** This is a self-hosted utility template. Trading, swaps, and wallet operations run on the operator's own wallet, keys, and funds, entirely at their own risk. Verify every token, contract, and NFT yourself before confirming. The full terms and license are being finalized.
 
 **The rule for every write — preview then confirm:**
 

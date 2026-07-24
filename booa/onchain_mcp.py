@@ -343,10 +343,7 @@ def _guard_info(dest: str, native_eth: Decimal) -> dict:
     return info
 
 
-def _guard(dest: str, native_eth: Decimal) -> None:
-    al = _allowlist()
-    if al and to_checksum_address(dest).lower() not in al:
-        raise PermissionError(f"{to_checksum_address(dest)} is not in BOOA_SEND_ALLOWLIST. Add it to allow this destination.")
+def _check_caps(native_eth: Decimal) -> None:
     per = _cap("BOOA_MAX_TX_ETH")
     if per > 0 and native_eth > per:
         raise PermissionError(f"Moves {native_eth} ETH, over the per-tx limit {per} (BOOA_MAX_TX_ETH).")
@@ -355,6 +352,26 @@ def _guard(dest: str, native_eth: Decimal) -> None:
         remaining = daily - _spent_today()
         if native_eth > remaining:
             raise PermissionError(f"Moves {native_eth} ETH but only {remaining} ETH left in today's general limit ({daily} BOOA_DAILY_CAP_ETH).")
+
+
+def _guard(dest: str, native_eth: Decimal) -> None:
+    al = _allowlist()
+    if al and to_checksum_address(dest).lower() not in al:
+        raise PermissionError(f"{to_checksum_address(dest)} is not in BOOA_SEND_ALLOWLIST. Add it to allow this destination.")
+    _check_caps(native_eth)
+
+
+# Honeypot guard: the agent may only swap INTO a token that is known-safe
+# (native, USDC, WETH) or one the operator explicitly trusts via
+# BOOA_SWAP_TOKEN_ALLOWLIST. Buying an arbitrary token is the classic drain
+# (a honeypot lets you buy but never sell), so this is refuse-by-default.
+def _swap_token_allowed(chain: str, token: str) -> bool:
+    t = token.lower()
+    if t == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee":  # native ETH sentinel
+        return True
+    safe = {a.lower() for a in TOKENS.get(chain, {}).values()}
+    allow = {a.strip().lower() for a in os.environ.get("BOOA_SWAP_TOKEN_ALLOWLIST", "").split(",") if a.strip()}
+    return t in safe or t in allow
 
 
 if _writes_enabled():
@@ -434,6 +451,11 @@ if _writes_enabled():
             is_native = sell.lower() == ETH_SENTINEL.lower()
             dec = 18 if is_native else _token_decimals(chain, sell)
             amount_in = int(Decimal(sell_amount) * (10 ** dec))
+            max_slip = int(os.environ.get("BOOA_MAX_SLIPPAGE_BPS", "300") or "300")
+            if int(slippage_bps) > max_slip:
+                return {"ok": False, "error": f"Slippage {slippage_bps} bps exceeds the cap {max_slip} (BOOA_MAX_SLIPPAGE_BPS)."}
+            if not _swap_token_allowed(chain, buy):
+                return {"ok": False, "error": f"Buy-side token {buy} is not verified/allowlisted. Only native, USDC, WETH, or a token in BOOA_SWAP_TOKEN_ALLOWLIST can be bought — this blocks honeypots."}
             base = f"https://aggregator-api.kyberswap.com/{KYBER[chain]}/api/v1"
             hdr = {"x-client-id": "booa-onchain"}
             rt = httpx.get(f"{base}/routes", params={"tokenIn": sell, "tokenOut": buy, "amountIn": str(amount_in)}, headers=hdr, timeout=25).json()
@@ -459,10 +481,17 @@ if _writes_enabled():
                 "router": router, "slippage_bps": slippage_bps, "needs_approval": needs_approval,
             }
             native_eth = Decimal(sell_amount) if is_native else Decimal(0)
-            preview["guardrails"] = _guard_info(router, native_eth)
+            per = _cap("BOOA_MAX_TX_ETH"); daily = _cap("BOOA_DAILY_CAP_ETH")
+            preview["guardrails"] = {
+                "native_moved_eth": str(native_eth),
+                "per_tx_cap_eth": str(per) if per > 0 else None,
+                "daily_remaining_eth": str(daily - _spent_today()) if daily > 0 else None,
+                "buy_token_verified": True,
+                "slippage_cap_bps": max_slip,
+            }
             if not confirm:
                 return {"ok": True, "preview": preview, "note": "Nothing swapped. confirm=true approves the exact amount (if needed) and executes."}
-            _guard(router, native_eth)
+            _check_caps(native_eth)
             txs = []
             if needs_approval:
                 appr = "0x" + _selector("approve(address,uint256)").hex() + abi_encode(["address", "uint256"], [router, amount_in]).hex()

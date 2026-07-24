@@ -184,28 +184,47 @@ def write_config(hermes_home: str, provider: str, api_key: str, model: str,
     # the live fleet is untouched until it's proven on a real deploy — set
     # BOOA_ONCHAIN_MCP=1 in Railway Variables to enable. A failed MCP server
     # degrades gracefully (its tools go missing); it never blocks the agent.
+    mcp_servers = {}
+    # booa-onchain (OWS-signed reads + gated writes). Off unless BOOA_ONCHAIN_MCP=1,
+    # so the live fleet is untouched until proven. A failed MCP server degrades
+    # gracefully (its tools go missing); it never blocks the agent.
     if os.environ.get("BOOA_ONCHAIN_MCP", "").lower() in ("1", "true", "yes"):
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         mcp_env = {"PYTHONPATH": repo_root, "HERMES_HOME": hermes_home}
         # Pass through what the onchain server needs even if the MCP launcher
         # does not inherit the parent env: PATH (to find `ows`), RPC overrides,
-        # the write gate, and the OWS auth token. Use a scoped OWS API key for
-        # OWS_PASSPHRASE — never the raw vault password.
+        # the write gate, the OWS auth token, and the OpenSea key (for OWS-signed
+        # OpenSea actions). Use a scoped OWS API key for OWS_PASSPHRASE — never
+        # the raw vault password.
         for _k in ("PATH", "OWS_PASSPHRASE", "OWS_BIN", "OWS_WALLET",
                    "BOOA_ONCHAIN_WRITES", "BOOA_MAX_TX_ETH", "BOOA_DAILY_CAP_ETH",
-                   "BOOA_SEND_ALLOWLIST", "ETH_RPC", "BASE_RPC"):
+                   "BOOA_SEND_ALLOWLIST", "BOOA_SWAP_TOKEN_ALLOWLIST", "BOOA_MAX_SLIPPAGE_BPS",
+                   "ETH_RPC", "BASE_RPC", "OPENSEA_API_KEY"):
             _v = os.environ.get(_k)
             if _v:
                 mcp_env[_k] = _v
-        config["mcp_servers"] = {
-            "booa-onchain": {
-                "command": sys.executable or "python",
-                "args": ["-m", "booa.onchain_mcp"],
-                "enabled": True,
-                "connect_timeout": 20,
-                "env": mcp_env,
-            }
+        mcp_servers["booa-onchain"] = {
+            "command": sys.executable or "python",
+            "args": ["-m", "booa.onchain_mcp"],
+            "enabled": True,
+            "connect_timeout": 20,
+            "env": mcp_env,
         }
+
+    # OpenSea MCP (hosted, read/discovery + tx-data tools). Never signs — it only
+    # returns data and unsigned transactions; execution goes through booa-onchain
+    # (OWS). Needs a free OpenSea API key. Gated so it stays opt-in.
+    _os_key = os.environ.get("OPENSEA_API_KEY")
+    if _os_key and os.environ.get("BOOA_OPENSEA_MCP", "").lower() in ("1", "true", "yes"):
+        mcp_servers["opensea"] = {
+            "url": "https://mcp.opensea.io/mcp",
+            "headers": {"X-API-KEY": _os_key},
+            "enabled": True,
+            "connect_timeout": 20,
+        }
+
+    if mcp_servers:
+        config["mcp_servers"] = mcp_servers
 
     if telegram_token:
         config["gateway"] = {
