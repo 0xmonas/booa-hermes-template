@@ -2,8 +2,6 @@
 
 BOOA Hermes Template is a free, open-source, **self-hosted utility template** (licensed under [MIT](LICENSE)). By deploying, configuring, or operating it, you ("the operator") acknowledge and agree to the terms below.
 
-This document is not legal advice and is not a substitute for professional counsel. Have a lawyer review it against your jurisdiction before relying on it.
-
 ## 1. Self-hosted and non-custodial
 
 You run this software on your own infrastructure. You alone control the agent's OWS wallet, its private keys and vault password, all API keys, and all funds. **The software never takes custody of your assets, and the authors never have access to your keys, wallet, or funds.** Securing your keys, passwords, server, and configuration is entirely your responsibility. Loss or theft of your keys means loss of your funds, and no one can recover them for you.
