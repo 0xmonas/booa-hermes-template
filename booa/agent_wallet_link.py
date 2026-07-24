@@ -133,8 +133,12 @@ def _ows_sign_typed_data(wallet_name: str, typed: dict) -> Optional[str]:
             return None
         out = json.loads(proc.stdout)
         sig = out.get("signature")
-        if isinstance(sig, str) and sig.startswith("0x"):
-            return sig
+        if isinstance(sig, str):
+            s = sig.strip()
+            hexpart = s[2:] if s.startswith("0x") else s
+            # OWS returns the signature WITHOUT the 0x prefix — accept both forms.
+            if hexpart and all(c in "0123456789abcdefABCDEF" for c in hexpart):
+                return s if s.startswith("0x") else "0x" + s
         _last_sign_error = f"unexpected output: {proc.stdout[:120]}"
         return None
     except (subprocess.SubprocessError, ValueError, FileNotFoundError) as exc:
