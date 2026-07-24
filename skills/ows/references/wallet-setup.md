@@ -275,7 +275,7 @@ Once the wallet is linked, the agent can act onchain through the **booa-onchain*
 - `BOOA_OPENSEA_REQUIRE_VERIFIED` — default `1`. `opensea_buy` refuses to buy from a collection that is not OpenSea-verified (scam/impersonation guard). The tool always fetches the listing from OpenSea, encodes the Seaport call itself, and **simulates it before signing** — a bad order, wrong encoding, or unaffordable price is refused, never broadcast. Buying is capped by the same per-tx / daily ETH limits. Get `order_hash` from the OpenSea search tools, then `opensea_buy(chain, order_hash)`.
 - Optional: `ETH_RPC` / `BASE_RPC` (custom RPCs).
 
-> **No warranty.** This is a self-hosted utility template. Trading, swaps, and wallet operations run on the operator's own wallet, keys, and funds, entirely at their own risk. Verify every token, contract, and NFT yourself before confirming. The full terms and license are being finalized.
+> **No warranty.** This is a self-hosted utility template. Trading, swaps, and wallet operations run on the operator's own wallet, keys, and funds, entirely at their own risk. Verify every token, contract, and NFT yourself before confirming. See [DISCLAIMER.md](../../../DISCLAIMER.md) for the full terms; licensed under [MIT](../../../LICENSE).
 
 **The rule for every write — preview then confirm:**
 

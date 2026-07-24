@@ -123,6 +123,10 @@ All data lives on a Railway persistent volume at `/data`. Survives container res
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Disclaimer
+
+This is a self-hosted, non-custodial utility template. If you enable them, the agent can send, swap, sign, trade NFTs, and make payments using **your own wallet and funds, entirely at your own risk**. Blockchain transactions are irreversible, and the authors take no custody and give no warranty. Read [DISCLAIMER.md](DISCLAIMER.md) before enabling any wallet or trading feature.
+
 ## License
 
 [MIT](LICENSE)
