@@ -25,7 +25,10 @@ BOOA_API = f"{BOOA_APP}/api"
 REGISTRY_ADDRESS = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
 DOMAIN_NAME = "ERC8004IdentityRegistry"
 DOMAIN_VERSION = "1"
-DEFAULT_DEADLINE_SECONDS = 3600  # generous copy-paste window
+# The registry enforces deadline <= block.timestamp + 300 ("deadline too far",
+# probed on mainnet). 240 leaves a minute of clock-skew margin — the operator
+# must open the link within ~4 minutes, so generate it right before using it.
+DEFAULT_DEADLINE_SECONDS = 240
 
 
 def _fetch_registry(chain_id: int, token_id: int, timeout: float = 8.0) -> Optional[dict]:
