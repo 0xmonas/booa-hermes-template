@@ -153,6 +153,13 @@ class TestScanApiKeys(unittest.TestCase):
         hits = [h for h in of.scan(text) if h.pattern_type == "api_key"]
         self.assertEqual(len(hits), 1)
 
+    def test_provider_key_prefix(self) -> None:
+        for key in ("sk-or-v1-abcdefghijklmnopqrstuvwxyz012345",
+                    "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"):
+            hits = [h for h in of.scan(f"OPENROUTER_API_KEY={key}") if h.pattern_type == "api_key"]
+            self.assertEqual(len(hits), 1, key)
+            self.assertEqual(hits[0].subtype, "provider")
+
 
 class TestScanLabeledHex(unittest.TestCase):
     def test_detects_labeled_private_key(self) -> None:

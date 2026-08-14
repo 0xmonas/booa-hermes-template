@@ -19,6 +19,7 @@ EXPORT_DIRS = ["memories", "skills", "context", "sessions"]
 RESTORE_DIRS = frozenset({"memories", "skills", "context", "sessions"})
 RESTORE_FILES = frozenset({"SOUL.md", "onchain-settings.json"})
 MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
+MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_ENTRY_BYTES = 50 * 1024 * 1024
 MAX_TOTAL_BYTES = 500 * 1024 * 1024
 MAX_ENTRIES = 20_000
@@ -39,6 +40,8 @@ def _redacted_config(hermes_path: Path) -> tuple[str, list[str]] | None:
     if isinstance(tg, dict) and tg.get("bot_token"):
         tg["bot_token"] = "__REDACTED__"
         redactions.append("config.yaml: gateway.platforms.telegram.bot_token")
+    if config.pop("mcp_servers", None) is not None:
+        redactions.append("config.yaml: mcp_servers (OWS passphrase, RPC, OpenSea key)")
     return yaml.dump(config, default_flow_style=False), redactions
 
 
@@ -108,11 +111,11 @@ def create_backup_zip(hermes_home: str, password: str, *, token_id, chain_id,
         if wallet_info is not None:
             add_text(wallet_info, "wallet-info.txt", "wallet-info.txt")
 
-        ows_path = data_home / ".ows"
-        if ows_path.exists():
-            for f in ows_path.rglob("*"):
+        ows_wallets = data_home / ".ows" / "wallets"
+        if ows_wallets.exists():
+            for f in ows_wallets.rglob("*"):
                 if f.is_file() and not f.is_symlink():
-                    add_file(f, "ows/" + str(f.relative_to(ows_path)), "ows/")
+                    add_file(f, "ows/wallets/" + str(f.relative_to(ows_wallets)), "ows/")
 
         manifest = {
             "format": BACKUP_FORMAT,
@@ -150,7 +153,11 @@ def restore_backup(hermes_home: str, archive_path: str, password: str, *,
         infos = zf.infolist()
         if len(infos) > MAX_ENTRIES:
             return _err("archive too large", 400)
-        manifest = json.loads(zf.read("manifest.json"))
+        manifest_info = next((i for i in infos if i.filename == "manifest.json"), None)
+        if manifest_info is None or manifest_info.file_size > MAX_MANIFEST_BYTES:
+            return _err("invalid archive or password", 400)
+        with zf.open(manifest_info) as mf:
+            manifest = json.loads(mf.read(MAX_MANIFEST_BYTES + 1))
     except Exception:
         return _err("invalid archive or password", 400)
 

@@ -62,6 +62,21 @@ class ServerFixTests(unittest.TestCase):
         self.assertIn(f"booa-hermes-template v{TEMPLATE_VERSION}", res.text)
         self.assertNotIn("v1.0.0", res.text)
 
+    def test_login_global_ceiling_survives_xff_rotation(self):
+        server.auth_limiter._failures.clear()
+        server.login_limiter._failures.clear()
+        blocked = False
+        for i in range(40):
+            res = self.client.post(
+                "/login",
+                data={"username": "admin", "password": f"wrong-{i}"},
+                headers={"x-forwarded-for": f"10.0.0.{i}"},
+            )
+            if "Too many attempts" in res.text:
+                blocked = True
+                break
+        self.assertTrue(blocked, "global ceiling should trip despite per-request XFF rotation")
+
 
 if __name__ == "__main__":
     unittest.main()

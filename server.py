@@ -62,6 +62,7 @@ jinja = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 jinja.env.globals["template_version"] = TEMPLATE_VERSION
 gateway = GatewayManager(HERMES_HOME)
 auth_limiter = console_auth.AuthRateLimiter()
+login_limiter = console_auth.AuthRateLimiter(max_failures=20, window_seconds=60)
 wizard_data: dict = {}
 
 
@@ -134,7 +135,7 @@ async def login_page(request: Request):
 
 async def login_submit(request: Request):
     ip = console_auth.client_ip(request)
-    if auth_limiter.blocked(ip):
+    if auth_limiter.blocked(ip) or login_limiter.blocked("global"):
         return render(request, "login.html", {"error": "Too many attempts. Try again in a minute."})
     form = await request.form()
     user_ok = secrets.compare_digest(str(form.get("username") or "").encode(), ADMIN_USERNAME.encode())
@@ -143,6 +144,7 @@ async def login_submit(request: Request):
         request.session["authenticated"] = True
         return RedirectResponse("/", status_code=303)
     auth_limiter.record_failure(ip)
+    login_limiter.record_failure("global")
     return render(request, "login.html", {"error": "Invalid credentials"})
 
 
@@ -923,6 +925,11 @@ async def console_logs_stream(request: Request):
         console_auth.get_or_create_api_server_key(HERMES_HOME),
         ADMIN_PASSWORD,
     ]
+    for _k in ("OPENROUTER_API_KEY", "OWS_PASSPHRASE", "OPENSEA_API_KEY",
+               "ETH_RPC", "BASE_RPC", "TELEGRAM_BOT_TOKEN"):
+        _v = os.environ.get(_k)
+        if _v and len(_v) >= 8:
+            deny.append(_v)
 
     def clean(line: str) -> str:
         return output_filter.filter_output(

@@ -72,6 +72,52 @@ class ExportTests(unittest.TestCase):
         self.assertTrue(any("bot_token" in r for r in manifest["redactions"]))
         os.unlink(path)
 
+    def test_mcp_secrets_stripped_from_config(self):
+        with open(os.path.join(self.home, "config.yaml"), "w") as f:
+            yaml.dump({
+                "model": {"default": "m"},
+                "mcp_servers": {
+                    "booa-onchain": {"env": {"OWS_PASSPHRASE": "vault-secret", "ETH_RPC": "https://rpc?key=abc"}},
+                    "opensea": {"headers": {"X-API-KEY": "os-secret"}},
+                },
+            }, f)
+        path = self.export()
+        with pyzipper.AESZipFile(path) as zf:
+            zf.setpassword(b"pw")
+            raw = zf.read("config.yaml").decode()
+        self.assertNotIn("vault-secret", raw)
+        self.assertNotIn("os-secret", raw)
+        self.assertNotIn("mcp_servers", raw)
+        os.unlink(path)
+
+    def test_ows_signing_secrets_excluded(self):
+        ows = Path(self.home).parent / ".ows"
+        (ows / "wallets").mkdir(parents=True)
+        (ows / "wallets" / "agent.json").write_text("ENCRYPTED_VAULT")
+        (ows / "keys").mkdir()
+        (ows / "keys" / "scoped.json").write_text("SCOPED_API_KEY")
+        (ows / "agent-api-key.txt").write_text("ows_key_SIGNING_SECRET")
+        path = self.export()
+        with pyzipper.AESZipFile(path) as zf:
+            zf.setpassword(b"pw")
+            names = zf.namelist()
+        self.assertIn("ows/wallets/agent.json", names)
+        self.assertNotIn("ows/agent-api-key.txt", names)
+        self.assertFalse(any("keys/" in n for n in names))
+        os.unlink(path)
+
+    def test_manifest_ram_bomb_rejected(self):
+        bad = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+        bad.close()
+        huge = json.dumps({"format": backup.BACKUP_FORMAT, "format_version": 1,
+                           "token_id": 7, "pad": "A" * (2 * 1024 * 1024)})
+        with pyzipper.AESZipFile(bad.name, "w", encryption=pyzipper.WZ_AES) as zf:
+            zf.setpassword(b"pw")
+            zf.writestr("manifest.json", huge)
+        result = backup.restore_backup(tempfile.mkdtemp(), bad.name, "pw", instance_token_id=7)
+        self.assertEqual(result["status"], 400)
+        os.unlink(bad.name)
+
 
 class RestoreTests(unittest.TestCase):
     def setUp(self):
