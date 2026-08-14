@@ -81,9 +81,11 @@ class RateLimiterTests(unittest.TestCase):
         rl.record_failure("ip1")
         self.assertFalse(rl.blocked("ip1"))
 
-    def test_client_ip_prefers_forwarded(self):
+    def test_client_ip_uses_rightmost_hop(self):
+        # The leftmost value is caller-supplied; keying limits on it lets an attacker
+        # rotate it to dodge throttling or spoof the operator's IP to lock them out.
         req = FakeRequest({"x-forwarded-for": "9.9.9.9, 10.0.0.1"})
-        self.assertEqual(console_auth.client_ip(req), "9.9.9.9")
+        self.assertEqual(console_auth.client_ip(req), "10.0.0.1")
         self.assertEqual(console_auth.client_ip(FakeRequest()), "1.2.3.4")
 
 

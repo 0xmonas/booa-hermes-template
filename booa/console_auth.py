@@ -70,9 +70,14 @@ def verify_console_key(hermes_home: str, request) -> bool:
 
 
 def client_ip(request) -> str:
+    """Rate-limit key from the RIGHTMOST forwarded hop — the one the platform edge
+    appended. The leftmost entry is whatever the caller sent, so keying on it lets
+    an attacker rotate it to dodge limits, or spoof the operator's IP to lock them out."""
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+        if hops:
+            return hops[-1]
     return request.client.host if request.client else "unknown"
 
 

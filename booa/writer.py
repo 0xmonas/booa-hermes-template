@@ -231,10 +231,12 @@ def write_config(hermes_home: str, provider: str, api_key: str, model: str,
 
     with open(env_path, "w") as f:
         f.write("\n".join(env_lines) + "\n")
+    os.chmod(env_path, 0o600)
 
     config_path = os.path.join(hermes_home, "config.yaml")
     with open(config_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
+    os.chmod(config_path, 0o600)
 
     ensure_api_server_platform(hermes_home)
     refresh_mcp_config(hermes_home)

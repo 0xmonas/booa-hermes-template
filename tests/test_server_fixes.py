@@ -12,6 +12,9 @@ import unittest
 
 os.environ.setdefault("HERMES_HOME", tempfile.mkdtemp())
 os.environ.setdefault("ADMIN_PASSWORD", "test-admin-pw")
+# The test client speaks http, so Secure cookies would never come back.
+os.environ.setdefault("BOOA_INSECURE_COOKIES", "1")
+os.environ.setdefault("BOOA_LOGIN_THROTTLE_SECONDS", "0")
 
 from starlette.testclient import TestClient
 
@@ -57,25 +60,48 @@ class ServerFixTests(unittest.TestCase):
         res = self.client.get("/console/meta")
         self.assertEqual(res.status_code, 403)
 
-    def test_login_page_shows_template_version(self):
+    def test_login_page_hides_template_version(self):
+        # Pre-auth pages must not fingerprint the exact template version for
+        # anyone who finds the instance.
         res = self.client.get("/login")
-        self.assertIn(f"booa-hermes-template v{TEMPLATE_VERSION}", res.text)
-        self.assertNotIn("v1.0.0", res.text)
+        self.assertNotIn(f"booa-hermes-template v{TEMPLATE_VERSION}", res.text)
 
-    def test_login_global_ceiling_survives_xff_rotation(self):
+    def test_correct_password_is_never_locked_out(self):
+        # A flood of wrong guesses must not stop the real operator getting in —
+        # otherwise anyone can lock a holder out of their own agent.
+        # Own client: logging in here must not authenticate the shared one.
+        client = TestClient(server.app)
         server.auth_limiter._failures.clear()
         server.login_limiter._failures.clear()
-        blocked = False
         for i in range(40):
-            res = self.client.post(
+            client.post(
                 "/login",
                 data={"username": "admin", "password": f"wrong-{i}"},
                 headers={"x-forwarded-for": f"10.0.0.{i}"},
             )
-            if "Too many attempts" in res.text:
-                blocked = True
-                break
-        self.assertTrue(blocked, "global ceiling should trip despite per-request XFF rotation")
+        res = client.post(
+            "/login",
+            data={"username": "admin", "password": os.environ["ADMIN_PASSWORD"]},
+            follow_redirects=False,
+        )
+        self.assertEqual(res.status_code, 303, "correct credentials must still authenticate")
+        server.auth_limiter._failures.clear()
+        server.login_limiter._failures.clear()
+
+    def test_session_dies_when_password_rotates(self):
+        client = TestClient(server.app)
+        client.post(
+            "/login",
+            data={"username": "admin", "password": os.environ["ADMIN_PASSWORD"]},
+            follow_redirects=False,
+        )
+        self.assertEqual(client.get("/api/wallet/status").status_code, 200)
+        original = server.ADMIN_PASSWORD
+        try:
+            server.ADMIN_PASSWORD = "a-new-password"
+            self.assertEqual(client.get("/api/wallet/status").status_code, 401)
+        finally:
+            server.ADMIN_PASSWORD = original
 
 
 if __name__ == "__main__":

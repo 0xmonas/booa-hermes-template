@@ -4,7 +4,7 @@ Deploy your BOOA as an autonomous AI agent. One-click deploy on Railway, zero te
 
 By [BOOA](https://booa.app)
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/dY7R1A?referralCode=gD4PGO&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/booa-hermes-template?referralCode=gD4PGO&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 [View on Railway Marketplace](https://railway.com/deploy/booa-hermes-template)
 
@@ -94,12 +94,27 @@ API keys and secrets are set here (Railway → Variables), never in the dashboar
 
 ## Security
 
-- Session-based admin auth (signed cookies, persistent across restarts)
-- Password re-confirmation required for data export
-- Mnemonic phrases never displayed in chat (enforced via SECURITY.md context rules)
-- Mnemonic automatically filtered from export files
+**Your dashboard is on the public internet.** Railway gives the service a public URL, and the
+hostname follows a predictable pattern, so assume strangers can find it. `ADMIN_PASSWORD` is the
+only thing standing between them and an agent that holds a wallet — so make it long and random
+(a password manager string, 24+ characters), never reuse it, and change it if you ever paste it
+somewhere. If you only use Telegram, you can remove the public domain in Railway → Settings →
+Networking after setup and the agent keeps working.
+
+What the template does for you:
+
+- Admin auth cannot be turned off; there is no default or shared password — yours is unique to your instance
+- A correct password is never rate-limited, so nobody can lock you out by spamming wrong guesses; wrong guesses are throttled instead
+- Changing `ADMIN_PASSWORD` immediately invalidates every existing dashboard session
+- Session cookies are `Secure`, `HttpOnly`, `SameSite=Lax`, and expire in 24 hours
+- Dashboard credentials are stripped from the agent's environment, so a prompt injection cannot read them
+- Admin password re-confirmation required for both export and import
+- Backups ship the encrypted wallet vault only — never the signing key, vault passphrase, or API keys
+- Mnemonics never displayed in chat (SECURITY.md rules) and filtered out of exports
 - OWS wallet vault encrypted at rest (AES-256-GCM)
-- Gateway runs as isolated subprocess
+- Web console is off by default, uses a separate rotatable key, and can never reach the dashboard
+- Logs streamed to the browser are scanned and redacted for keys and secrets first
+- Gateway runs as an isolated subprocess, authenticated with its own per-install key
 - ERC-8004 verification checked on every dashboard load
 
 ## Data Persistence

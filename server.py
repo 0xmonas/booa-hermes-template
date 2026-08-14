@@ -1,6 +1,7 @@
 """BOOA Hermes Agent — Railway admin server."""
 
 import asyncio
+import hashlib
 import json
 import os
 import secrets
@@ -63,6 +64,7 @@ jinja.env.globals["template_version"] = TEMPLATE_VERSION
 gateway = GatewayManager(HERMES_HOME)
 auth_limiter = console_auth.AuthRateLimiter()
 login_limiter = console_auth.AuthRateLimiter(max_failures=20, window_seconds=60)
+LOGIN_THROTTLE_SECONDS = float(os.environ.get("BOOA_LOGIN_THROTTLE_SECONDS", "2"))
 wizard_data: dict = {}
 
 
@@ -108,11 +110,20 @@ load_wizard_data()
 def render(request: Request, name: str, ctx: dict | None = None):
     context = ctx or {}
     context["request"] = request
+    context.setdefault("authed", require_auth(request))
     return jinja.TemplateResponse(request, name, context)
 
 
+def _password_epoch() -> str:
+    """Session validity is tied to the current password, so rotating
+    ADMIN_PASSWORD immediately invalidates every session that used the old one."""
+    return hashlib.sha256(f"booa-session:{ADMIN_PASSWORD}".encode()).hexdigest()[:16]
+
+
 def require_auth(request: Request) -> bool:
-    return request.session.get("authenticated") is True
+    if request.session.get("authenticated") is not True:
+        return False
+    return secrets.compare_digest(str(request.session.get("pw") or ""), _password_epoch())
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -135,16 +146,22 @@ async def login_page(request: Request):
 
 async def login_submit(request: Request):
     ip = console_auth.client_ip(request)
-    if auth_limiter.blocked(ip) or login_limiter.blocked("global"):
-        return render(request, "login.html", {"error": "Too many attempts. Try again in a minute."})
     form = await request.form()
     user_ok = secrets.compare_digest(str(form.get("username") or "").encode(), ADMIN_USERNAME.encode())
     pass_ok = secrets.compare_digest(str(form.get("password") or "").encode(), ADMIN_PASSWORD.encode())
+
+    # The correct password is never rejected: throttling a valid login would let
+    # anyone lock the operator out of their own agent by spamming wrong guesses.
     if user_ok and pass_ok:
         request.session["authenticated"] = True
+        request.session["pw"] = _password_epoch()
         return RedirectResponse("/", status_code=303)
+
     auth_limiter.record_failure(ip)
     login_limiter.record_failure("global")
+    # Wrong guesses pay a delay instead, so guessing stays slow without a lockout.
+    if auth_limiter.blocked(ip) or login_limiter.blocked("global"):
+        await asyncio.sleep(LOGIN_THROTTLE_SECONDS)
     return render(request, "login.html", {"error": "Invalid credentials"})
 
 
@@ -1060,7 +1077,13 @@ async def lifespan(app):
 
 app = Starlette(
     routes=routes,
-    middleware=[Middleware(SessionMiddleware, secret_key=SESSION_SECRET)],
+    middleware=[Middleware(
+        SessionMiddleware,
+        secret_key=SESSION_SECRET,
+        https_only=os.environ.get("BOOA_INSECURE_COOKIES") != "1",
+        same_site="lax",
+        max_age=24 * 60 * 60,
+    )],
     lifespan=lifespan,
 )
 
