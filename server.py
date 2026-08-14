@@ -1088,6 +1088,9 @@ async def console_meta(request: Request):
         "token_id": token_id,
         "chain_id": chain_id,
         "agent_name": wizard_data.get("name", ""),
+        "provider": wizard_data.get("provider", ""),
+        "model": wizard_data.get("model", ""),
+        "skills": wizard_data.get("skills_installed", []),
         "gateway": {"running": gateway.is_running, "uptime": int(gateway.uptime_seconds)},
         "console": {"enabled": True},
     })
