@@ -4,10 +4,12 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import sys
 import time
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import httpx
@@ -652,6 +654,57 @@ async def import_data(request: Request):
     return await _do_import(request)
 
 
+async def console_onchain_get(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    cur = _read_onchain_settings()
+    return JSONResponse({
+        "settings": {k: str(cur.get(k, "") or "") for k in ONCHAIN_KEYS},
+        "writes_enabled": _truthy(cur.get("BOOA_ONCHAIN_WRITES", "")),
+        "note": "Tightening a limit needs only this console. Loosening one needs the admin password.",
+    })
+
+
+async def console_onchain_post(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid body"}, status_code=400)
+
+    proposed = {k: str(body.get(k, "")).strip() for k in ONCHAIN_KEYS if k in body}
+    if not proposed:
+        return JSONResponse({"error": "nothing to change"}, status_code=400)
+    bad = validate_onchain_settings(proposed)
+    if bad:
+        return JSONResponse({"error": bad}, status_code=400)
+
+    cur = _read_onchain_settings()
+    if onchain_change_loosens(cur, proposed):
+        supplied = str(body.get("admin_password") or "")
+        if not secrets.compare_digest(supplied.encode(), ADMIN_PASSWORD.encode()):
+            return JSONResponse(
+                {"error": "admin_password_required",
+                 "detail": "This change widens what the agent may spend, so it needs the admin password."},
+                status_code=403,
+            )
+
+    cur.pop("OPENSEA_API_KEY", None)
+    cur.update(proposed)
+    with open(_ONCHAIN_PATH, "w") as f:
+        json.dump(cur, f, indent=2)
+    try:
+        os.chmod(_ONCHAIN_PATH, 0o600)
+    except OSError:
+        pass
+    refresh_mcp_config(HERMES_HOME)
+    return JSONResponse({"ok": True, "settings": {k: str(cur.get(k, "") or "") for k in ONCHAIN_KEYS},
+                         "note": "Limits and allowlists apply immediately; enable toggles need a gateway restart."})
+
+
 async def console_export(request: Request):
     denied = check_console_access(HERMES_HOME, auth_limiter, request)
     if denied:
@@ -801,6 +854,84 @@ ONCHAIN_KEYS = [
 ]
 _ONCHAIN_PATH = os.path.join(HERMES_HOME, "onchain-settings.json")
 
+_ONCHAIN_BOOLS = {"BOOA_ONCHAIN_MCP", "BOOA_ONCHAIN_WRITES", "BOOA_OPENSEA_MCP",
+                  "BOOA_OPENSEA_REQUIRE_VERIFIED"}
+_ONCHAIN_CAPS = {"BOOA_MAX_TX_ETH", "BOOA_DAILY_CAP_ETH"}
+_ONCHAIN_LISTS = {"BOOA_SEND_ALLOWLIST", "BOOA_SWAP_TOKEN_ALLOWLIST"}
+_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
+
+def _truthy(v: str) -> bool:
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def validate_onchain_settings(proposed: dict) -> str | None:
+    """Reject values that would silently disable a guardrail. A cap typed as
+    '0.1 ETH' used to parse as zero, which means no limit at all."""
+    for key, raw in proposed.items():
+        value = str(raw).strip()
+        if not value:
+            continue
+        if key in _ONCHAIN_CAPS:
+            try:
+                if Decimal(value) < 0:
+                    return f"{key} cannot be negative."
+            except InvalidOperation:
+                return f"{key} must be a plain number like 0.05 — '{value}' is not."
+        elif key == "BOOA_MAX_SLIPPAGE_BPS":
+            if not value.isdigit() or not (0 <= int(value) <= 10_000):
+                return f"{key} must be a whole number of basis points between 0 and 10000."
+        elif key in _ONCHAIN_LISTS:
+            for entry in value.split(","):
+                entry = entry.strip()
+                if entry and not _ADDRESS_RE.match(entry):
+                    return f"{key} contains '{entry}', which is not a 0x address."
+    return None
+
+
+def onchain_change_loosens(current: dict, proposed: dict) -> bool:
+    """True when the change widens what the agent may spend. Tightening is always
+    allowed from the console so the operator can pull the brake from their phone;
+    loosening is what needs the admin password."""
+    for key, raw in proposed.items():
+        new = str(raw).strip()
+        old = str(current.get(key, "")).strip()
+        if new == old:
+            continue
+        if key in _ONCHAIN_BOOLS:
+            # REQUIRE_VERIFIED protects the operator, so turning it ON is tightening.
+            if key == "BOOA_OPENSEA_REQUIRE_VERIFIED":
+                if not _truthy(new) and _truthy(old or "1"):
+                    return True
+            elif _truthy(new) and not _truthy(old):
+                return True
+        elif key in _ONCHAIN_CAPS:
+            # An empty cap means unlimited, so clearing one is the widest possible move.
+            if not new:
+                if old:
+                    return True
+            elif old:
+                try:
+                    if Decimal(new) > Decimal(old):
+                        return True
+                except InvalidOperation:
+                    return True
+        elif key in _ONCHAIN_LISTS:
+            # An empty allowlist means every destination is allowed.
+            old_set = {a.strip().lower() for a in old.split(",") if a.strip()}
+            new_set = {a.strip().lower() for a in new.split(",") if a.strip()}
+            if old_set and not new_set:
+                return True
+            if new_set - old_set:
+                return True
+        elif key == "BOOA_MAX_SLIPPAGE_BPS":
+            try:
+                if not new or (old and int(new) > int(old)):
+                    return True
+            except ValueError:
+                return True
+    return False
+
 
 def _sync_secret_env_keys():
     """Upsert secrets from the process env (Railway Variables) into HERMES_HOME/.env."""
@@ -870,8 +1001,13 @@ async def onchain_settings_post(request: Request):
     form = await request.form()
     cur = _read_onchain_settings()
     cur.pop("OPENSEA_API_KEY", None)  # secrets live in Railway env, never here
-    for k in ONCHAIN_KEYS:
-        cur[k] = (form.get(k) or "").strip()
+    # Only keys actually submitted are touched: writing all of them let a partial
+    # save silently blank every cap and allowlist the form didn't include.
+    proposed = {k: (form.get(k) or "").strip() for k in ONCHAIN_KEYS if k in form}
+    bad = validate_onchain_settings(proposed)
+    if bad:
+        return JSONResponse({"error": bad}, status_code=400)
+    cur.update(proposed)
     with open(_ONCHAIN_PATH, "w") as f:
         json.dump(cur, f, indent=2)
     try:
@@ -1065,6 +1201,8 @@ routes = [
         Route("/meta", console_meta),
         Route("/gateway/restart", console_gateway_restart, methods=["POST"]),
         Route("/logs/stream", console_logs_stream),
+        Route("/onchain-settings", console_onchain_get),
+        Route("/onchain-settings", console_onchain_post, methods=["POST"]),
         Route("/export", console_export, methods=["POST"]),
         Route("/import", console_import, methods=["POST"]),
     ])),
