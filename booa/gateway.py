@@ -42,7 +42,8 @@ class GatewayManager:
         # The agent reads untrusted input and has shell + file tools. Dashboard
         # credentials are not its business: leaving them in this env makes a prompt
         # injection a path to the admin login and the backup archive password.
-        for secret_key in ("ADMIN_PASSWORD", "ADMIN_USERNAME", "BOOA_CONSOLE_ORIGINS"):
+        for secret_key in ("ADMIN_PASSWORD", "ADMIN_USERNAME", "BOOA_CONSOLE_ORIGINS",
+                           "_BOOA_PW_FD", "_BOOA_ENV_SCRUBBED"):
             env.pop(secret_key, None)
         env["HERMES_HOME"] = self.hermes_home
         env["HOME"] = os.path.dirname(self.hermes_home)

@@ -87,7 +87,8 @@ Your agent can:
 | `OPENSEA_API_KEY` | No | Enables OpenSea search + trading tools (free key: docs.opensea.io/reference/api-keys) |
 | `BOOA_ONCHAIN_MCP`, `BOOA_ONCHAIN_WRITES`, `BOOA_OPENSEA_MCP` | No | Enable onchain read tools / trading + wallet actions / OpenSea. Also settable from the dashboard's Onchain & Trading card |
 | `BOOA_MAX_TX_ETH`, `BOOA_DAILY_CAP_ETH`, `BOOA_SEND_ALLOWLIST`, `BOOA_SWAP_TOKEN_ALLOWLIST`, `BOOA_MAX_SLIPPAGE_BPS`, `BOOA_OPENSEA_REQUIRE_VERIFIED` | No | Trading guardrails — per-tx and daily ETH caps, destination and token allowlists, slippage cap, verified-only buying. Dashboard values win over env |
-| `OWS_PASSPHRASE` | No | Scoped OWS API key for autonomous signing (never the vault password) |
+| `OWS_PASSPHRASE` | No | Scoped OWS API key for autonomous signing (never the vault password). **Put a spend rule in its OWS policy** — the agent has a shell, so the policy is the only limit it cannot talk its way around |
+| `BOOA_SCRUB_ENV` | No | Set to `1` to keep `ADMIN_PASSWORD` out of the server process's environment, so the agent cannot read it. Opt-in: turn it on, then confirm you can still log in. If the hand-off ever fails the server generates a new random password and prints it to the Railway logs |
 | `ETH_RPC`, `BASE_RPC` | No | Custom RPC endpoints |
 
 API keys and secrets are set here (Railway → Variables), never in the dashboard. Everything else is configured through the web dashboard.

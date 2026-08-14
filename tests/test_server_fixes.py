@@ -6,7 +6,9 @@ Run:
 
 from __future__ import annotations
 
+import json
 import os
+import sys
 import tempfile
 import unittest
 
@@ -87,6 +89,41 @@ class ServerFixTests(unittest.TestCase):
         self.assertEqual(res.status_code, 303, "correct credentials must still authenticate")
         server.auth_limiter._failures.clear()
         server.login_limiter._failures.clear()
+
+    def test_importing_the_server_never_reexecs(self):
+        # The scrub re-execs the process. If that fired on import, anything importing
+        # this module (a test run, a script) would silently become a running server.
+        self.assertIsNone(server._reexec_without_admin_password())
+
+    def test_env_scrub_flag_does_not_break_an_importing_process(self):
+        # Turning the hardening flag on must not change anything for a process that
+        # imports the module rather than running it — otherwise enabling it would
+        # break tooling and tests in ways an operator would not expect.
+        import subprocess, tempfile as tf, textwrap
+        repo = os.path.dirname(os.path.abspath(server.__file__))
+        probe = textwrap.dedent(f"""
+            import os, sys, json
+            sys.path.insert(0, {repo!r})
+            import server
+            print(json.dumps({{
+                "password_usable": server.ADMIN_PASSWORD == "probe-pw",
+                "no_reexec": server._reexec_without_admin_password() is None,
+            }}))
+        """)
+        with tf.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            f.write(probe)
+            path = f.name
+        env = dict(os.environ, ADMIN_PASSWORD="probe-pw", BOOA_SCRUB_ENV="1",
+                   HERMES_HOME=tf.mkdtemp())
+        try:
+            out = subprocess.run([sys.executable, path], env=env, capture_output=True,
+                                 text=True, timeout=60)
+            self.assertTrue(out.stdout.strip(), f"probe produced no output: {out.stderr[-400:]}")
+            data = json.loads(out.stdout.strip().splitlines()[-1])
+        finally:
+            os.unlink(path)
+        self.assertTrue(data["password_usable"])
+        self.assertTrue(data["no_reexec"])
 
     def test_session_dies_when_password_rotates(self):
         client = TestClient(server.app)

@@ -12,9 +12,11 @@ Run: python -m booa.onchain_mcp  (Hermes launches it as a stdio MCP server)
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import subprocess
+import tempfile
 import time
 from decimal import Decimal
 from typing import Any, Optional
@@ -310,6 +312,8 @@ def _ows_sign_message(wallet: str, chain: str, *, message: str = "", typed_data:
 #   BOOA_MAX_TX_ETH      per-transaction native cap
 #   BOOA_DAILY_CAP_ETH   general rolling-day native cap (tracked in a ledger)
 _SPEND_LEDGER = os.path.join(HERMES_HOME, "onchain-spend.json")
+_SPEND_LOCK = os.path.join(HERMES_HOME, ".onchain-spend.lock")
+_WINDOW_SECONDS = 24 * 60 * 60
 
 
 def _allowlist() -> set:
@@ -333,29 +337,108 @@ def _cap(name: str) -> Decimal:
     return value
 
 
-def _today() -> str:
-    return time.strftime("%Y-%m-%d", time.gmtime())
+def _atomic_write_json(path: str, obj: dict) -> None:
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".spend-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(obj, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except Exception:
+            pass
+        raise
+
+
+def _prune(entries: Any, now: float) -> tuple[list, Decimal]:
+    cutoff = now - _WINDOW_SECONDS
+    kept: list = []
+    total = Decimal(0)
+    if isinstance(entries, list):
+        for e in entries:
+            try:
+                ts = float(e["ts"])
+                amt = Decimal(str(e["amount"]))
+            except Exception:
+                continue
+            if amt > 0 and ts >= cutoff:
+                kept.append({"ts": ts, "amount": str(amt)})
+                total += amt
+    return kept, total
 
 
 def _spent_today() -> Decimal:
+    """Native ETH reserved in the trailing 24h. Read-only, for previews — the
+    authoritative check-and-reserve happens in _record_spend under a lock."""
     try:
-        d = json.load(open(_SPEND_LEDGER))
-        return Decimal(str(d.get("spent", "0"))) if d.get("date") == _today() else Decimal(0)
+        with open(_SPEND_LOCK, "a") as lk:
+            fcntl.flock(lk, fcntl.LOCK_SH)
+            try:
+                try:
+                    with open(_SPEND_LEDGER) as f:
+                        entries = json.load(f).get("entries", [])
+                except FileNotFoundError:
+                    entries = []
+                return _prune(entries, time.time())[1]
+            finally:
+                fcntl.flock(lk, fcntl.LOCK_UN)
     except Exception:
         return Decimal(0)
 
 
 def _record_spend(native_eth: Decimal) -> None:
+    """Check the daily cap and reserve against it in one locked step, before the tx is
+    broadcast. Two concurrent callers used to both read the old total and both pass, and
+    a calendar-day reset let the full cap go out at 23:59 and again at 00:01. A ledger
+    that cannot be written blocks the spend rather than silently allowing it — a failed
+    broadcast therefore still consumes its reservation, which is the safe direction."""
     if native_eth <= 0:
         return
+    daily = _cap("BOOA_DAILY_CAP_ETH")
+    if daily <= 0:
+        return
     try:
-        with open(_SPEND_LEDGER, "w") as f:
-            json.dump({"date": _today(), "spent": str(_spent_today() + native_eth)}, f)
-    except Exception:
-        pass
+        lk = open(_SPEND_LOCK, "a")
+    except OSError as e:
+        raise PermissionError(
+            f"Cannot open the spend-ledger lock ({e}); blocking the spend so the daily "
+            "cap (BOOA_DAILY_CAP_ETH) cannot be bypassed."
+        )
+    try:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            with open(_SPEND_LEDGER) as f:
+                entries = json.load(f).get("entries", [])
+        except FileNotFoundError:
+            entries = []
+        except Exception:
+            entries = []
+        now = time.time()
+        kept, total = _prune(entries, now)
+        remaining = daily - total
+        if native_eth > remaining:
+            raise PermissionError(
+                f"Moves {native_eth} ETH but only {remaining} ETH left in the rolling "
+                f"24h limit ({daily} BOOA_DAILY_CAP_ETH)."
+            )
+        kept.append({"ts": now, "amount": str(native_eth)})
+        try:
+            _atomic_write_json(_SPEND_LEDGER, {"entries": kept})
+        except Exception as e:
+            raise PermissionError(
+                f"Could not persist the spend ledger ({e}); blocking the spend so the "
+                "daily cap cannot be bypassed by a read-only or full volume."
+            )
+    finally:
+        fcntl.flock(lk, fcntl.LOCK_UN)
+        lk.close()
 
 
-def _guard_info(dest: str, native_eth: Decimal) -> dict:
+def _guard_info(dest: str, native_eth: Decimal, non_native: bool = False) -> dict:
     al, per, daily = _allowlist(), _cap("BOOA_MAX_TX_ETH"), _cap("BOOA_DAILY_CAP_ETH")
     info = {
         "allowlist_active": bool(al),
@@ -363,6 +446,8 @@ def _guard_info(dest: str, native_eth: Decimal) -> dict:
         "native_moved_eth": str(native_eth),
         "per_tx_cap_eth": str(per) if per > 0 else None,
     }
+    if non_native:
+        info["token_amount_uncapped"] = "ETH caps do not bound token amounts; the allowlist is the gate."
     if daily > 0:
         info["daily_cap_eth"] = str(daily)
         info["daily_remaining_eth"] = str(daily - _spent_today())
@@ -373,15 +458,23 @@ def _check_caps(native_eth: Decimal) -> None:
     per = _cap("BOOA_MAX_TX_ETH")
     if per > 0 and native_eth > per:
         raise PermissionError(f"Moves {native_eth} ETH, over the per-tx limit {per} (BOOA_MAX_TX_ETH).")
-    daily = _cap("BOOA_DAILY_CAP_ETH")
-    if daily > 0:
-        remaining = daily - _spent_today()
-        if native_eth > remaining:
-            raise PermissionError(f"Moves {native_eth} ETH but only {remaining} ETH left in today's general limit ({daily} BOOA_DAILY_CAP_ETH).")
+    # Checking the daily cap and reserving against it must be one step, or two
+    # concurrent calls both read the same remaining balance and both proceed.
+    _record_spend(native_eth)
 
 
-def _guard(dest: str, native_eth: Decimal) -> None:
+def _guard(dest: str, native_eth: Decimal, non_native: bool = False) -> None:
     al = _allowlist()
+    # The ETH caps bound native value only. A token or NFT amount is not priced, so it
+    # reaches here as 0 and slips past them — an operator who set caps would be moving
+    # unlimited USDC without knowing. With no allowlist to gate the destination there is
+    # nothing left holding it, so refuse rather than pass it through at value 0.
+    if non_native and not al and (_cap("BOOA_MAX_TX_ETH") > 0 or _cap("BOOA_DAILY_CAP_ETH") > 0):
+        raise PermissionError(
+            "BOOA_MAX_TX_ETH / BOOA_DAILY_CAP_ETH bound native ETH only, and a token amount "
+            "cannot be priced here. Set BOOA_SEND_ALLOWLIST to the destinations tokens may go "
+            "to — token transfers are refused while caps are set but the allowlist is empty."
+        )
     if al and to_checksum_address(dest).lower() not in al:
         raise PermissionError(f"{to_checksum_address(dest)} is not in BOOA_SEND_ALLOWLIST. Add it to allow this destination.")
     _check_caps(native_eth)
@@ -563,12 +656,11 @@ if _writes_enabled():
                     return {"ok": False, "error": f"Native amount {amount} exceeds BOOA_MAX_TX_ETH cap ({cap}). Raise the cap to proceed."}
             native_eth = Decimal(0) if token else Decimal(amount)
             unsigned, meta = _build_unsigned_1559(chain, w["address"], target, value, data)
-            preview = {"action": "send", "chain": chain, "from": to_checksum_address(w["address"]), "summary": summary, **meta, "guardrails": _guard_info(to, native_eth)}
+            preview = {"action": "send", "chain": chain, "from": to_checksum_address(w["address"]), "summary": summary, **meta, "guardrails": _guard_info(to, native_eth, non_native=bool(token))}
             if not confirm:
                 return {"ok": True, "preview": preview, "note": "Nothing sent. Show this to the operator, then call again with confirm=true to broadcast."}
-            _guard(to, native_eth)
+            _guard(to, native_eth, non_native=bool(token))
             txh = _ows_send(chain, w["name"], unsigned)
-            _record_spend(native_eth)
             return {"ok": True, "sent": True, "tx": txh, "explorer": f"{CHAINS[chain]['explorer']}/tx/{txh}", "summary": summary}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -593,7 +685,6 @@ if _writes_enabled():
                 return {"ok": True, "preview": preview, "note": "Nothing sent. confirm=true to broadcast."}
             _guard(address, native_eth)
             txh = _ows_send(chain, w["name"], unsigned)
-            _record_spend(native_eth)
             return {"ok": True, "sent": True, "tx": txh, "explorer": f"{CHAINS[chain]['explorer']}/tx/{txh}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -668,7 +759,6 @@ if _writes_enabled():
                 txs.append({"approve": approve_tx})
             u2, _ = _build_unsigned_1559(chain, owner, router, amount_in if is_native else 0, calldata)
             txs.append({"swap": _ows_send(chain, w["name"], u2)})
-            _record_spend(native_eth)
             return {"ok": True, "sent": True, "txs": txs, "summary": preview}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -763,7 +853,6 @@ if _writes_enabled():
             _check_caps(native_eth)
             unsigned, _ = _build_unsigned_1559(chain, owner, to, value, data)
             txh = _ows_send(chain, w["name"], unsigned)
-            _record_spend(native_eth)
             return {"ok": True, "bought": True, "nft": nft, "tx": txh, "explorer": f"{CHAINS[chain]['explorer']}/tx/{txh}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}

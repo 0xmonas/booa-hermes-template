@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import types
 import unittest
 from decimal import Decimal
@@ -85,6 +86,100 @@ class TypedDataGuardTests(unittest.TestCase):
     def test_malformed_json_refused(self):
         with self.assertRaises(PermissionError):
             m._check_typed_data_safety("not json")
+
+
+class SpendLedgerTests(unittest.TestCase):
+    """The daily cap is only a limit if concurrent callers cannot both pass it."""
+
+    def setUp(self):
+        os.environ["BOOA_DAILY_CAP_ETH"] = "1.0"
+        for p in (m._SPEND_LEDGER, m._SPEND_LOCK):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+
+    def tearDown(self):
+        os.environ.pop("BOOA_DAILY_CAP_ETH", None)
+        os.environ.pop("BOOA_MAX_TX_ETH", None)
+
+    def test_concurrent_reservations_cannot_both_pass(self):
+        import threading
+        results = []
+        barrier = threading.Barrier(2)
+
+        def reserve():
+            barrier.wait()
+            try:
+                m._record_spend(Decimal("0.6"))
+                results.append("ok")
+            except PermissionError:
+                results.append("blocked")
+
+        threads = [threading.Thread(target=reserve) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sorted(results), ["blocked", "ok"], "0.6 + 0.6 must not both clear a 1.0 cap")
+        self.assertEqual(m._spent_today(), Decimal("0.6"))
+
+    def test_window_is_rolling_not_calendar_day(self):
+        # An entry just under 24h old still counts; the old code reset at UTC midnight,
+        # so the full cap was spendable at 23:59 and again at 00:01.
+        now = time.time()
+        m._atomic_write_json(m._SPEND_LEDGER, {"entries": [{"ts": now - 60, "amount": "0.9"}]})
+        self.assertEqual(m._spent_today(), Decimal("0.9"))
+        with self.assertRaises(PermissionError):
+            m._record_spend(Decimal("0.5"))
+
+    def test_entries_older_than_the_window_drop_out(self):
+        now = time.time()
+        m._atomic_write_json(m._SPEND_LEDGER, {"entries": [{"ts": now - (25 * 3600), "amount": "0.9"}]})
+        self.assertEqual(m._spent_today(), Decimal(0))
+        m._record_spend(Decimal("0.5"))
+
+    def test_unwritable_ledger_blocks_the_spend(self):
+        # A read-only or full volume used to silently reset the ledger to zero,
+        # which quietly removed the cap.
+        original = m._atomic_write_json
+        m._atomic_write_json = lambda *a, **k: (_ for _ in ()).throw(OSError("read-only volume"))
+        try:
+            with self.assertRaises(PermissionError):
+                m._record_spend(Decimal("0.1"))
+        finally:
+            m._atomic_write_json = original
+
+    def test_no_daily_cap_configured_is_a_no_op(self):
+        os.environ["BOOA_DAILY_CAP_ETH"] = ""
+        m._record_spend(Decimal("100"))
+        self.assertEqual(m._spent_today(), Decimal(0))
+
+
+class TokenTransferGuardTests(unittest.TestCase):
+    """ETH caps cannot bound an unpriced token amount, so an empty allowlist must not
+    silently mean 'unlimited USDC' when the operator has set caps."""
+
+    def tearDown(self):
+        for k in ("BOOA_SEND_ALLOWLIST", "BOOA_MAX_TX_ETH", "BOOA_DAILY_CAP_ETH"):
+            os.environ.pop(k, None)
+
+    def test_token_move_refused_when_caps_set_but_no_allowlist(self):
+        os.environ["BOOA_MAX_TX_ETH"] = "0.01"
+        with self.assertRaises(PermissionError):
+            m._guard(ATTACKER, Decimal(0), non_native=True)
+
+    def test_token_move_allowed_to_allowlisted_destination(self):
+        os.environ["BOOA_MAX_TX_ETH"] = "0.01"
+        os.environ["BOOA_SEND_ALLOWLIST"] = ALLOWED
+        m._guard(ALLOWED, Decimal(0), non_native=True)
+
+    def test_native_send_unaffected(self):
+        os.environ["BOOA_MAX_TX_ETH"] = "0.01"
+        m._guard(ATTACKER, Decimal("0.005"))
+
+    def test_fully_opt_out_config_still_permissive(self):
+        m._guard(ATTACKER, Decimal(0), non_native=True)
 
 
 class CapParsingTests(unittest.TestCase):

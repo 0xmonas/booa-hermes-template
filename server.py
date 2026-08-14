@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -37,13 +38,54 @@ from booa import output_filter
 from booa.console_proxy import build_console_app, check_console_access
 from booa.gateway import GatewayManager
 
+def _reexec_without_admin_password():
+    """Opt-in (BOOA_SCRUB_ENV=1): re-exec so the admin password leaves this process's
+    environment block, then receive it over an inherited pipe.
+
+    The agent runs as the same user and can read /proc/1/environ, which is this
+    process — one shell line would hand it the dashboard password. execve rebuilds
+    the environment block, so after this the password is not in it. Returns None
+    when the flag is off, leaving startup byte-identical to before."""
+    # Only when this file is the process being run. Re-execing on import would turn
+    # any process that merely imports this module into a running server.
+    if __name__ != "__main__" or os.environ.get("BOOA_SCRUB_ENV") != "1":
+        return None
+
+    if os.environ.get("_BOOA_ENV_SCRUBBED") == "1":
+        fd = int(os.environ.get("_BOOA_PW_FD", "-1"))
+        if fd < 0:
+            return None
+        try:
+            pw = os.read(fd, 4096).decode()
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        return pw
+
+    pw = os.environ.get("ADMIN_PASSWORD", "")
+    if not pw:
+        return None
+    read_fd, write_fd = os.pipe()
+    os.set_inheritable(read_fd, True)
+    os.write(write_fd, pw.encode())
+    os.close(write_fd)
+    env = {k: v for k, v in os.environ.items() if k != "ADMIN_PASSWORD"}
+    env["_BOOA_ENV_SCRUBBED"] = "1"
+    env["_BOOA_PW_FD"] = str(read_fd)
+    os.execve(sys.executable, [sys.executable, os.path.abspath(__file__)], env)
+
+
+_scrubbed_pw = _reexec_without_admin_password()
+
 # Config
 HERMES_HOME = os.environ.get("HERMES_HOME", "/data/hermes")
 # BOOA's canonical home is Ethereum (chain 1) post-migration. Override only if a
 # BOOA still lives on Shape (360) and hasn't migrated.
 BOOA_CHAIN_ID = int(os.environ.get("BOOA_CHAIN_ID", "1"))
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+ADMIN_PASSWORD = _scrubbed_pw if _scrubbed_pw is not None else os.environ.get("ADMIN_PASSWORD", "")
 PORT = int(os.environ.get("PORT", "8080"))
 
 if not ADMIN_PASSWORD:
