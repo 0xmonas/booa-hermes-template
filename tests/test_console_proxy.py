@@ -110,6 +110,18 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.headers.get("access-control-allow-origin"), "https://booa.app")
 
+    def test_cors_preflight_www_origin(self):
+        # www is canonical (the apex 308-redirects to it), so this is the Origin
+        # browsers actually send — missing it blocked every real console connect.
+        for path in ("/console/meta", "/api/sessions", "/v1/models"):
+            res = self.client.options(path, headers={
+                "Origin": "https://www.booa.app",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization",
+            })
+            self.assertEqual(res.status_code, 200, path)
+            self.assertEqual(res.headers.get("access-control-allow-origin"), "https://www.booa.app", path)
+
     def test_cors_preflight_evil_origin(self):
         res = self.client.options("/api/sessions", headers={
             "Origin": "https://evil.example",

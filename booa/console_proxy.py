@@ -1,5 +1,6 @@
 """Web console sub-app: proxies an allowlisted slice of the hermes api_server."""
 
+import os
 import re
 
 import httpx
@@ -14,7 +15,13 @@ from starlette.routing import Route
 from booa import console_auth
 
 UPSTREAM = "http://127.0.0.1:8642"
-ALLOWED_ORIGINS = ["https://booa.app", "http://localhost:3000"]
+# www is the canonical booa.app origin (the apex 308-redirects to it), so it is the
+# Origin browsers actually send. BOOA_CONSOLE_ORIGINS adds extras, comma-separated.
+_DEFAULT_ORIGINS = ["https://www.booa.app", "https://booa.app", "http://localhost:3000"]
+ALLOWED_ORIGINS = _DEFAULT_ORIGINS + [
+    o.strip() for o in os.environ.get("BOOA_CONSOLE_ORIGINS", "").split(",")
+    if o.strip().startswith("https://")
+]
 MAX_PROXY_STREAMS = 6
 
 _PATH_PARAM = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
