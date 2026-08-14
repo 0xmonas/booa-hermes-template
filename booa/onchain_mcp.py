@@ -303,8 +303,9 @@ def _ows_sign_message(wallet: str, chain: str, *, message: str = "", typed_data:
 
 # ── autonomy guardrails: allowlist + two ETH caps ───────────────────────────
 # Preview → confirm protects interactive use, but a cron fires with no human in
-# the loop, so these are the real backstop for autonomous actions. All are
-# opt-in via env; the OWS policy remains the cryptographic gate underneath.
+# the loop, so these are the backstop for autonomous actions. All are opt-in.
+# These gates bind tool calls only: the agent also has a shell, so a spend rule
+# in the OWS policy is what actually constrains a wallet key it can reach.
 #   BOOA_SEND_ALLOWLIST  destinations writes may target (wallets/contracts)
 #   BOOA_MAX_TX_ETH      per-transaction native cap
 #   BOOA_DAILY_CAP_ETH   general rolling-day native cap (tracked in a ledger)
@@ -316,10 +317,20 @@ def _allowlist() -> set:
 
 
 def _cap(name: str) -> Decimal:
-    try:
-        return Decimal(_cfg(name, "0") or "0")
-    except Exception:
+    raw = (_cfg(name, "0") or "0").strip()
+    if not raw:
         return Decimal(0)
+    try:
+        value = Decimal(raw)
+    except Exception:
+        # A typo like "0.1 ETH" used to parse as 0, which means "no limit" — the
+        # operator would believe a cap was active while nothing enforced it.
+        raise PermissionError(
+            f"{name} is set to {raw!r}, which is not a number. Writes are blocked until it is fixed."
+        )
+    if value < 0:
+        raise PermissionError(f"{name} is negative ({raw}). Writes are blocked until it is fixed.")
+    return value
 
 
 def _today() -> str:
@@ -374,6 +385,52 @@ def _guard(dest: str, native_eth: Decimal) -> None:
     if al and to_checksum_address(dest).lower() not in al:
         raise PermissionError(f"{to_checksum_address(dest)} is not in BOOA_SEND_ALLOWLIST. Add it to allow this destination.")
     _check_caps(native_eth)
+
+
+# A signature can move value without ever sending a transaction, so the ETH caps
+# are blind to it: one Permit hands an attacker the whole token balance. These
+# types get the same destination allowlist a transfer would.
+_SPENDER_TYPES = {"permit", "permitsingle", "permitbatch", "permittransferfrom", "permitwitnesstransferfrom"}
+_ORDER_TYPES = {"ordercomponents", "order", "seaportorder"}
+_UNLIMITED = 2 ** 255
+
+
+def _check_typed_data_safety(typed_data_json: str) -> None:
+    try:
+        data = json.loads(typed_data_json)
+    except Exception:
+        raise PermissionError("typed_data must be valid JSON.")
+    primary = str(data.get("primaryType", "")).lower()
+    message = data.get("message") or {}
+    al = _allowlist()
+
+    if primary in _SPENDER_TYPES:
+        spender = message.get("spender") or message.get("operator") or ""
+        details = message.get("details")
+        if not spender and isinstance(details, dict):
+            spender = details.get("spender", "")
+        if al:
+            if not spender:
+                raise PermissionError("Refusing to sign an approval with no spender while BOOA_SEND_ALLOWLIST is set.")
+            if to_checksum_address(spender).lower() not in al:
+                raise PermissionError(
+                    f"{to_checksum_address(spender)} is not in BOOA_SEND_ALLOWLIST. "
+                    "Signing this approval would let it spend the agent's tokens."
+                )
+        for key in ("value", "amount", "allowance"):
+            raw = message.get(key)
+            if raw is None and isinstance(details, dict):
+                raw = details.get(key)
+            try:
+                if raw is not None and int(str(raw), 0) >= _UNLIMITED:
+                    raise PermissionError("Refusing to sign an unlimited token approval.")
+            except (TypeError, ValueError):
+                continue
+
+    if primary in _ORDER_TYPES and al:
+        raise PermissionError(
+            "Refusing to sign a marketplace order directly. Use opensea_list, which prices and gates the sale."
+        )
 
 
 # Honeypot guard: the agent may only swap INTO a token that is known-safe
@@ -599,7 +656,9 @@ if _writes_enabled():
             }
             if not confirm:
                 return {"ok": True, "preview": preview, "note": "Nothing swapped. confirm=true approves the exact amount (if needed) and executes."}
-            _check_caps(native_eth)
+            # The router is chosen by the aggregator response, so it must clear the
+            # same allowlist as any other destination we hand value to.
+            _guard(router, native_eth)
             txs = []
             if needs_approval:
                 appr = "0x" + _selector("approve(address,uint256)").hex() + abi_encode(["address", "uint256"], [router, amount_in]).hex()
@@ -632,6 +691,7 @@ if _writes_enabled():
         if not w.get("address"):
             return {"ok": False, "error": "No agent wallet set."}
         try:
+            _check_typed_data_safety(typed_data_json)
             return {"ok": True, "signature": _ows_sign_message(w["name"], chain, typed_data=typed_data_json)}
         except Exception as e:
             return {"ok": False, "error": str(e)}

@@ -273,7 +273,7 @@ Once the wallet is linked, the agent can act onchain through the **booa-onchain*
 **Enable (dashboard → Onchain & Trading card, or Railway Variables — the dashboard wins; API keys are Railway-only):**
 - `BOOA_ONCHAIN_MCP=1` — read tools: `get_balances`, `token_balance`, `read_contract`, `gas_price`, `get_wallet`.
 - `BOOA_ONCHAIN_WRITES=1` — write tools: `send`, `write_contract`, `swap`, `sign_message`, `sign_typed_data`, `x402_pay`, `opensea_buy`, `opensea_list`, `accept_offer`. Off by default; reads stay available without it.
-- `OWS_PASSPHRASE` — set to a **scoped OWS API key** (`ows key create --wallet <name> --policy <id>`), never the raw vault password. The policy is your real spending limit.
+- `OWS_PASSPHRASE` — set to a **scoped OWS API key** (`ows key create --wallet <name> --policy <id>`), never the raw vault password. **Put a spend rule in that policy — a chain and expiry alone do not limit anything.** The agent has a shell in the same container as this key, so the `BOOA_*` caps and allowlists bind its tools but cannot bind the key itself. The policy is the only limit that survives an agent doing something you did not ask for, so cap the amount and pin the destinations there, and fund the wallet with only what you can afford to lose.
 - `BOOA_SEND_ALLOWLIST` — comma-separated addresses (wallets or contracts) that writes may target. When set, `send`, `write_contract`, and `swap` refuse any other destination, whatever the agent is told.
 - `BOOA_MAX_TX_ETH` — per-transaction limit (the "işlem limiti"): max native ETH a single tx may move.
 - `BOOA_DAILY_CAP_ETH` — general limit: max native ETH across a rolling day, tracked in a ledger so recurring jobs cannot drain past it.
