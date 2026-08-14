@@ -8,12 +8,14 @@ import shutil
 import time
 from pathlib import Path
 
+import httpx
 import uvicorn
 from starlette.applications import Starlette
+from starlette.background import BackgroundTask
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from starlette.routing import Route, Mount
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
@@ -24,10 +26,14 @@ from booa.writer import (
     write_user_md, write_seed_memory, write_skills, write_config,
     generate_user_md, mark_setup_complete, is_setup_complete,
     write_security_rules, install_output_filter_hook, migrate_pairing_files,
-    refresh_mcp_config,
+    refresh_mcp_config, ensure_api_server_platform, TEMPLATE_VERSION,
 )
 from booa import wallet_status
 from booa import agent_wallet_link
+from booa import backup
+from booa import console_auth
+from booa import output_filter
+from booa.console_proxy import build_console_app, check_console_access
 from booa.gateway import GatewayManager
 
 # Config
@@ -53,7 +59,9 @@ else:
     SECRET_FILE.write_text(SESSION_SECRET)
 
 jinja = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+jinja.env.globals["template_version"] = TEMPLATE_VERSION
 gateway = GatewayManager(HERMES_HOME)
+auth_limiter = console_auth.AuthRateLimiter()
 wizard_data: dict = {}
 
 
@@ -109,7 +117,7 @@ def require_auth(request: Request) -> bool:
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 async def health(request: Request):
-    return JSONResponse({"status": "ok", "gateway": gateway.is_running})
+    return JSONResponse({"status": "ok"})
 
 
 async def index(request: Request):
@@ -125,10 +133,16 @@ async def login_page(request: Request):
 
 
 async def login_submit(request: Request):
+    ip = console_auth.client_ip(request)
+    if auth_limiter.blocked(ip):
+        return render(request, "login.html", {"error": "Too many attempts. Try again in a minute."})
     form = await request.form()
-    if form.get("username") == ADMIN_USERNAME and form.get("password") == ADMIN_PASSWORD:
+    user_ok = secrets.compare_digest(str(form.get("username") or "").encode(), ADMIN_USERNAME.encode())
+    pass_ok = secrets.compare_digest(str(form.get("password") or "").encode(), ADMIN_PASSWORD.encode())
+    if user_ok and pass_ok:
         request.session["authenticated"] = True
         return RedirectResponse("/", status_code=303)
+    auth_limiter.record_failure(ip)
     return render(request, "login.html", {"error": "Invalid credentials"})
 
 
@@ -319,6 +333,8 @@ async def gateway_stop_route(request: Request):
 
 
 async def gateway_status(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
     return JSONResponse({"running": gateway.is_running, "uptime": int(gateway.uptime_seconds)})
 
 
@@ -486,70 +502,111 @@ async def pairing_deny(request: Request):
     return JSONResponse({"ok": True})
 
 
+async def _do_export(password: str):
+    if not secrets.compare_digest(password.encode(), ADMIN_PASSWORD.encode()):
+        return JSONResponse({"error": "invalid password"}, status_code=400)
+    load_wizard_data()
+    tc = _token_chain_from_wizard()
+    token_id, chain_id = tc if tc is not None else (None, BOOA_CHAIN_ID)
+    name = wizard_data.get("name", "agent").lower().replace(" ", "-")
+    path = await asyncio.to_thread(
+        backup.create_backup_zip, HERMES_HOME, password,
+        token_id=token_id, chain_id=chain_id, agent_name=name,
+        hermes_pin=os.environ.get("HERMES_PIN", ""),
+    )
+    date = time.strftime("%Y%m%d")
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=f"{name}-backup-{date}.zip",
+        background=BackgroundTask(os.unlink, path),
+    )
+
+
 async def download_data(request: Request):
-    """Download all agent data as ZIP. Requires password re-confirmation."""
     if not require_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
+    form = await request.form()
+    return await _do_export(str(form.get("password") or ""))
 
-    pw = request.query_params.get("pw", "")
-    if pw != ADMIN_PASSWORD:
-        return render(request, "dashboard.html", {
-            "data": wizard_data,
-            "avatar_svg": "",
-            "gateway_running": gateway.is_running,
-            "uptime": 0,
-            "wallet_address": "",
-            "verified": None,
-            "agent_wallet_registered": False,
-            "registered_by": "",
-            "nft_owner": "",
-        })
 
-    import zipfile
-    import io
+async def _do_import(request: Request):
+    form = await request.form()
+    admin_password = str(form.get("admin_password") or "")
+    if not secrets.compare_digest(admin_password.encode(), ADMIN_PASSWORD.encode()):
+        return JSONResponse({"error": "invalid archive or password"}, status_code=400)
+    archive_password = str(form.get("archive_password") or "") or admin_password
 
-    buf = io.BytesIO()
-    hermes_path = Path(HERMES_HOME)
+    upload = form.get("archive")
+    if upload is None or not hasattr(upload, "read"):
+        return JSONResponse({"error": "missing archive"}, status_code=400)
 
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for folder in ["memories", "skills", "context", "sessions"]:
-            folder_path = hermes_path / folder
-            if folder_path.exists():
-                for f in folder_path.rglob("*"):
-                    if f.is_file():
-                        arcname = str(f.relative_to(hermes_path))
-                        zf.write(f, arcname)
+    tmp = Path(HERMES_HOME) / f".import-upload-{int(time.time())}.zip"
+    written = 0
+    try:
+        with open(tmp, "wb") as out:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > backup.MAX_ARCHIVE_BYTES:
+                    return JSONResponse({"error": "archive too large"}, status_code=400)
+                out.write(chunk)
 
-        # Include SOUL.md and config
-        for fname in ["SOUL.md", "config.yaml"]:
-            fpath = hermes_path / fname
-            if fpath.exists():
-                zf.write(fpath, fname)
+        load_wizard_data()
+        tc = _token_chain_from_wizard()
+        instance_token_id = tc[0] if tc is not None else None
 
-        # Include wallet info (without mnemonic)
-        wallet_path = Path("/data/.agent/wallet-info.txt")
-        if wallet_path.exists():
-            content = wallet_path.read_text()
-            safe_lines = [l for l in content.splitlines()
-                         if "mnemonic" not in l.lower()
-                         and not (len(l.strip().split()) >= 10 and all(w.isalpha() for w in l.strip().split()))]
-            zf.writestr("wallet-info.txt", "\n".join(safe_lines))
+        await gateway.stop()
+        result = await asyncio.to_thread(
+            backup.restore_backup, HERMES_HOME, str(tmp), archive_password,
+            instance_token_id=instance_token_id,
+            confirm_token_mismatch=str(form.get("confirm_token_mismatch") or "") == "1",
+            restore_wallet=str(form.get("restore_wallet") or "") == "1",
+        )
+        status = result.pop("status", 200)
+        if result.get("ok"):
+            ensure_api_server_platform(HERMES_HOME)
+            refresh_mcp_config(HERMES_HOME)
+            install_output_filter_hook(HERMES_HOME)
+            wizard_data.clear()
+            load_wizard_data()
+            tc = _token_chain_from_wizard()
+            if tc is not None:
+                try:
+                    wallet_status.refresh(HERMES_HOME, tc[1], tc[0])
+                except Exception:
+                    pass
+        await gateway.start()
+        result["gateway_running"] = gateway.is_running
+        return JSONResponse(result, status_code=status)
+    finally:
+        tmp.unlink(missing_ok=True)
 
-        # Include OWS wallet files (encrypted vault — safe to export)
-        ows_path = Path("/data/.ows")
-        if ows_path.exists():
-            for f in ows_path.rglob("*"):
-                if f.is_file():
-                    arcname = "ows/" + str(f.relative_to(ows_path))
-                    zf.write(f, arcname)
 
-    buf.seek(0)
-    name = wizard_data.get("name", "agent").lower().replace(" ", "-")
-    return StreamingResponse(
-        buf,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{name}-data.zip"'},
-    )
+async def import_data(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return await _do_import(request)
+
+
+async def console_export(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid body"}, status_code=400)
+    return await _do_export(str(body.get("password") or ""))
+
+
+async def console_import(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    return await _do_import(request)
 
 
 async def reset_wizard(request: Request):
@@ -576,7 +633,8 @@ def _token_chain_from_wizard() -> tuple[int, int] | None:
 
 
 async def wallet_status_get(request: Request):
-    require_auth_json = request.session.get("authenticated")
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
     state = wallet_status.read_state(HERMES_HOME)
     if state is None:
         return JSONResponse({"state": "unknown", "message": "no state yet"})
@@ -765,6 +823,142 @@ async def onchain_settings_post(request: Request):
                          "API keys are set in Railway → Variables."})
 
 
+async def console_config_get(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return JSONResponse({
+        "enabled": console_auth.console_enabled(HERMES_HOME),
+        "key": console_auth.get_or_create_console_key(HERMES_HOME),
+    })
+
+
+async def console_config_post(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid body"}, status_code=400)
+    action = body.get("action")
+    if action == "enable":
+        console_auth.set_console_enabled(HERMES_HOME, True)
+    elif action == "disable":
+        console_auth.set_console_enabled(HERMES_HOME, False)
+    elif action == "rotate":
+        console_auth.rotate_console_key(HERMES_HOME)
+    else:
+        return JSONResponse({"error": "unknown action"}, status_code=400)
+    return JSONResponse({
+        "enabled": console_auth.console_enabled(HERMES_HOME),
+        "key": console_auth.get_or_create_console_key(HERMES_HOME),
+    })
+
+
+# ── Web console (booa.app) ────────────────────────────────────────────────────
+
+_hermes_health_cache: dict = {"ts": 0.0, "version": None}
+_restart_lock = asyncio.Lock()
+_log_stream_count = {"count": 0}
+
+
+async def _hermes_version() -> str | None:
+    now = time.time()
+    if now - _hermes_health_cache["ts"] < 60:
+        return _hermes_health_cache["version"]
+    version = None
+    try:
+        async with httpx.AsyncClient(timeout=2) as c:
+            r = await c.get("http://127.0.0.1:8642/health")
+            if r.status_code == 200:
+                version = r.json().get("version")
+    except Exception:
+        pass
+    _hermes_health_cache.update(ts=now, version=version)
+    return version
+
+
+async def console_meta(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    load_wizard_data()
+    tc = _token_chain_from_wizard()
+    token_id, chain_id = tc if tc is not None else (None, BOOA_CHAIN_ID)
+    return JSONResponse({
+        "template_version": TEMPLATE_VERSION,
+        "hermes_version": await _hermes_version(),
+        "hermes_pin": os.environ.get("HERMES_PIN", ""),
+        "token_id": token_id,
+        "chain_id": chain_id,
+        "agent_name": wizard_data.get("name", ""),
+        "gateway": {"running": gateway.is_running, "uptime": int(gateway.uptime_seconds)},
+        "console": {"enabled": True},
+    })
+
+
+async def console_gateway_restart(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    async with _restart_lock:
+        ok = await gateway.restart()
+    return JSONResponse({"ok": bool(ok), "running": gateway.is_running})
+
+
+async def console_logs_stream(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    if _log_stream_count["count"] >= 2:
+        return JSONResponse({"error": "too many streams"}, status_code=429)
+
+    private_hashes = output_filter.compute_file_hashes([
+        os.path.join(HERMES_HOME, "memories", "USER.md"),
+        os.path.join(HERMES_HOME, "memories", "MEMORY.md"),
+        os.path.join(HERMES_HOME, ".env"),
+        os.path.join(HERMES_HOME, "secrets.txt"),
+    ])
+    deny = [
+        console_auth.get_or_create_console_key(HERMES_HOME),
+        console_auth.get_or_create_api_server_key(HERMES_HOME),
+        ADMIN_PASSWORD,
+    ]
+
+    def clean(line: str) -> str:
+        return output_filter.filter_output(
+            line, channel="console-logs",
+            private_file_hashes=private_hashes, deny_list=deny,
+        ).text
+
+    async def generate():
+        _log_stream_count["count"] += 1
+        try:
+            for line in gateway.get_recent_logs(200):
+                yield f"data: {clean(line)}\n\n"
+            seen = gateway.log_seq
+            last_emit = time.time()
+            while True:
+                current = gateway.log_seq
+                if current > seen:
+                    new = min(current - seen, len(gateway.log_lines))
+                    for line in list(gateway.log_lines)[-new:]:
+                        yield f"data: {clean(line)}\n\n"
+                    seen = current
+                    last_emit = time.time()
+                elif time.time() - last_emit >= 15:
+                    yield ": keepalive\n\n"
+                    last_emit = time.time()
+                await asyncio.sleep(0.5)
+        finally:
+            _log_stream_count["count"] -= 1
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 
 routes = [
@@ -788,7 +982,10 @@ routes = [
     Route("/settings/reset", reset_wizard, methods=["POST"]),
     Route("/api/onchain-settings", onchain_settings_get),
     Route("/api/onchain-settings", onchain_settings_post, methods=["POST"]),
-    Route("/download", download_data),
+    Route("/api/console/config", console_config_get),
+    Route("/api/console/config", console_config_post, methods=["POST"]),
+    Route("/download", download_data, methods=["POST"]),
+    Route("/import", import_data, methods=["POST"]),
     Route("/gateway/errors", gateway_errors),
     Route("/pairing", pairing_list),
     Route("/pairing/approve", pairing_approve, methods=["POST"]),
@@ -798,6 +995,13 @@ routes = [
     Route("/api/wallet/challenge", wallet_challenge_create, methods=["POST"]),
     Route("/api/wallet/verify", wallet_verify_post, methods=["POST"]),
     Route("/api/wallet/link-code", wallet_link_code_post, methods=["POST"]),
+    Mount("/console", app=build_console_app(HERMES_HOME, auth_limiter, extra_routes=[
+        Route("/meta", console_meta),
+        Route("/gateway/restart", console_gateway_restart, methods=["POST"]),
+        Route("/logs/stream", console_logs_stream),
+        Route("/export", console_export, methods=["POST"]),
+        Route("/import", console_import, methods=["POST"]),
+    ])),
     Mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static"),
 ]
 
@@ -813,6 +1017,7 @@ async def lifespan(app):
         # is our static hardcoded policy, never operator data or the NFT-derived SOUL.
         write_security_rules(HERMES_HOME)
         # Keep config.yaml mcp_servers in sync with the operator's onchain-settings.json.
+        ensure_api_server_platform(HERMES_HOME)
         refresh_mcp_config(HERMES_HOME)
         # Railway Variables are the source of truth for secrets: sync them into the
         # Hermes .env on every boot, so a key set or rotated in Railway takes effect

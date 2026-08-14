@@ -15,6 +15,7 @@ from pathlib import Path
 # OWS is BOOA-specific; generic keys are handled by Nous's agent.redact.
 _API_KEY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bows_key_[A-Za-z0-9]{20,}\b"), "ows"),
+    (re.compile(r"\bbooa_ck_[A-Za-z0-9_\-]{20,}\b"), "console"),
 ]
 
 _WIF_PATTERN = re.compile(r"\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b")

@@ -6,7 +6,7 @@ import shutil
 import sys
 import yaml
 
-TEMPLATE_VERSION = "1.0.1"
+TEMPLATE_VERSION = "1.1.0"
 
 
 def ensure_dirs(hermes_home: str):
@@ -209,14 +209,11 @@ def write_config(hermes_home: str, provider: str, api_key: str, model: str,
     # so it can be re-derived from onchain-settings.json (dashboard-editable) at any
     # time — on setup, on dashboard save, and on boot.
 
+    config["gateway"] = {"platforms": {}}
     if telegram_token:
-        config["gateway"] = {
-            "platforms": {
-                "telegram": {
-                    "enabled": True,
-                    "bot_token": telegram_token,
-                }
-            }
+        config["gateway"]["platforms"]["telegram"] = {
+            "enabled": True,
+            "bot_token": telegram_token,
         }
         if telegram_users:
             config["gateway"]["platforms"]["telegram"]["allowed_users"] = telegram_users
@@ -239,7 +236,25 @@ def write_config(hermes_home: str, provider: str, api_key: str, model: str,
     with open(config_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
 
+    ensure_api_server_platform(hermes_home)
     refresh_mcp_config(hermes_home)
+
+
+def ensure_api_server_platform(hermes_home: str, enabled: bool = True):
+    """Write the api_server platform block into config.yaml. The key stays in env only."""
+    config_path = os.path.join(hermes_home, "config.yaml")
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f) or {}
+    except OSError:
+        return
+    platforms = config.setdefault("gateway", {}).setdefault("platforms", {})
+    platforms["api_server"] = {
+        "enabled": bool(enabled),
+        "extra": {"host": "127.0.0.1", "port": 8642},
+    }
+    with open(config_path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False)
 
 
 def _onchain_cfg(hermes_home: str, key: str, default: str = "") -> str:

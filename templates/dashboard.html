@@ -132,6 +132,29 @@
   </div>
 </div>
 
+<div class="card" id="console-section">
+  <h3>Web Console — booa.app</h3>
+  <div class="info-box text-xs mb-2">
+    Chat with and manage this agent from <a href="https://booa.app/studio/agent-console" target="_blank" rel="noopener">booa.app → Studio → Agent Console</a>. <strong>Off by default.</strong> Paste the instance URL and console key there. The key only unlocks chat, logs and backups — never this dashboard, your wallet or your API keys.
+  </div>
+  <div class="text-xs" style="display:flex;flex-direction:column;gap:8px;">
+    <div>Status: <strong id="console-status">checking…</strong></div>
+    <div>Instance URL: <code id="console-url"></code> <button onclick="copyConsoleUrl()" class="btn-sm btn-outline">Copy</button></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <span>Console key:</span>
+      <code id="console-key" data-key="">••••••••••••</code>
+      <button onclick="toggleConsoleKey()" class="btn-sm btn-outline" id="console-key-toggle">Reveal</button>
+      <button onclick="copyConsoleKey()" class="btn-sm btn-outline">Copy</button>
+    </div>
+  </div>
+  <div class="flex gap-2 mt-2">
+    <button onclick="setConsole('enable')" class="btn-sm" id="console-enable-btn">Enable</button>
+    <button onclick="setConsole('disable')" class="btn-sm btn-outline" id="console-disable-btn" style="display:none;">Disable</button>
+    <button onclick="rotateConsoleKey()" class="btn-sm btn-outline" title="Invalidates the old key immediately. Paste the new one into booa.app after rotating.">Rotate key</button>
+    <span id="console-result" class="text-xs text-muted"></span>
+  </div>
+</div>
+
 <div class="card" id="pairing-section">
   <h3>Telegram Pairing</h3>
   <div id="pairing-connected" style="display:none;">
@@ -154,6 +177,7 @@
   <a href="/logs" class="btn btn-outline w-full text-center">View Logs</a>
   <a href="/settings" class="btn btn-outline w-full text-center">Settings</a>
   <a href="#" onclick="confirmExport()" class="btn btn-outline w-full text-center">Export Data</a>
+  <a href="#" onclick="confirmImport()" class="btn btn-outline w-full text-center">Import Data</a>
 </div>
 
 <form method="POST" action="/settings/reset" style="text-align: center;">
@@ -238,10 +262,61 @@ async function pairingAction(action, platform, code) {
   checkPairing();
 }
 
-function confirmExport() {
+async function confirmExport() {
   const pw = prompt('Enter your admin password to export data:');
-  if (pw) {
-    window.location.href = '/download?pw=' + encodeURIComponent(pw);
+  if (!pw) return;
+  const fd = new FormData();
+  fd.append('password', pw);
+  const res = await fetch('/download', { method: 'POST', body: fd });
+  if (!res.ok) { alert('Export failed — wrong password?'); return; }
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const cd = res.headers.get('Content-Disposition') || '';
+  const m = cd.match(/filename="([^"]+)"/);
+  a.download = m ? m[1] : 'booa-backup.zip';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function confirmImport() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.zip';
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    const pw = prompt('Enter your admin password to import. This overwrites memories, skills, context, sessions and SOUL.md, then restarts the gateway. config.yaml and your wallet vault are not touched.');
+    if (!pw) return;
+    let archivePw = '';
+    if (!confirm('Was this backup exported with the same admin password? OK = yes, Cancel = enter the archive password.')) {
+      archivePw = prompt('Archive password:') || '';
+      if (!archivePw) return;
+    }
+    await sendImport(file, pw, archivePw, false);
+  };
+  input.click();
+}
+
+async function sendImport(file, pw, archivePw, confirmMismatch) {
+  const fd = new FormData();
+  fd.append('archive', file);
+  fd.append('admin_password', pw);
+  if (archivePw) fd.append('archive_password', archivePw);
+  if (confirmMismatch) fd.append('confirm_token_mismatch', '1');
+  const res = await fetch('/import', { method: 'POST', body: fd });
+  const d = await res.json().catch(() => ({}));
+  if (res.status === 409 && d.error === 'token_mismatch') {
+    if (confirm(`This backup belongs to BOOA #${d.manifest_token_id} but this instance runs BOOA #${d.instance_token_id}. Import anyway?`)) {
+      await sendImport(file, pw, archivePw, true);
+    }
+    return;
+  }
+  if (res.ok) {
+    alert('Import complete. Restored: ' + (d.restored || []).join(', ') + ((d.warnings || []).length ? '\n' + d.warnings.join('\n') : ''));
+    location.reload();
+  } else {
+    alert('Import failed: ' + (d.error || 'unknown error'));
   }
 }
 
@@ -389,10 +464,50 @@ async function saveOnchainSettings() {
   } catch (e) { result.textContent = 'Request failed.'; }
 }
 
+let consoleKeyRevealed = false;
+async function loadConsoleConfig() {
+  try {
+    const res = await fetch('/api/console/config');
+    if (!res.ok) return;
+    const data = await res.json();
+    document.getElementById('console-status').textContent = data.enabled ? 'Enabled' : 'Disabled';
+    document.getElementById('console-enable-btn').style.display = data.enabled ? 'none' : '';
+    document.getElementById('console-disable-btn').style.display = data.enabled ? '' : 'none';
+    const el = document.getElementById('console-key');
+    el.dataset.key = data.key;
+    el.textContent = consoleKeyRevealed ? data.key : '••••••••••••';
+    document.getElementById('console-url').textContent = location.origin;
+  } catch (e) {}
+}
+function toggleConsoleKey() {
+  consoleKeyRevealed = !consoleKeyRevealed;
+  const el = document.getElementById('console-key');
+  el.textContent = consoleKeyRevealed ? el.dataset.key : '••••••••••••';
+  document.getElementById('console-key-toggle').textContent = consoleKeyRevealed ? 'Hide' : 'Reveal';
+}
+async function copyConsoleKey() {
+  await navigator.clipboard.writeText(document.getElementById('console-key').dataset.key);
+  document.getElementById('console-result').textContent = 'Key copied';
+}
+async function copyConsoleUrl() {
+  await navigator.clipboard.writeText(location.origin);
+  document.getElementById('console-result').textContent = 'URL copied';
+}
+async function setConsole(action) {
+  const res = await fetch('/api/console/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+  if (res.ok) loadConsoleConfig();
+}
+async function rotateConsoleKey() {
+  if (!confirm('Rotate the console key? The old key stops working immediately — paste the new one into booa.app.')) return;
+  const res = await fetch('/api/console/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'rotate' }) });
+  if (res.ok) { document.getElementById('console-result').textContent = 'Key rotated'; loadConsoleConfig(); }
+}
+
 setInterval(() => { checkPairing(); checkErrors(); renderWalletStatus(); }, 3000);
 checkPairing();
 checkErrors();
 renderWalletStatus();
 loadOnchainSettings();
+loadConsoleConfig();
 </script>
 {% endblock %}

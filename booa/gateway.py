@@ -6,15 +6,22 @@ import signal
 from collections import deque
 from typing import AsyncGenerator
 
+from booa.console_auth import get_or_create_api_server_key
+
 
 class GatewayManager:
     def __init__(self, hermes_home: str):
         self.hermes_home = hermes_home
         self.process: asyncio.subprocess.Process | None = None
         self.log_lines: deque[str] = deque(maxlen=1000)
+        self.log_seq = 0
         self._read_task: asyncio.Task | None = None
         self._started_at: float | None = None
         self._recent_errors: list[tuple[float, str]] = []
+
+    def _log(self, text: str):
+        self.log_lines.append(text)
+        self.log_seq += 1
 
     @property
     def is_running(self) -> bool:
@@ -34,6 +41,7 @@ class GatewayManager:
         env = os.environ.copy()
         env["HERMES_HOME"] = self.hermes_home
         env["HOME"] = os.path.dirname(self.hermes_home)
+        env["API_SERVER_KEY"] = get_or_create_api_server_key(self.hermes_home)
 
         try:
             self.process = await asyncio.create_subprocess_exec(
@@ -46,10 +54,10 @@ class GatewayManager:
             import time
             self._started_at = time.time()
             self._read_task = asyncio.create_task(self._read_output())
-            self.log_lines.append("[booa] gateway started")
+            self._log("[booa] gateway started")
             return True
         except Exception as e:
-            self.log_lines.append(f"[booa] failed to start gateway: {e}")
+            self._log(f"[booa] failed to start gateway: {e}")
             return False
 
     async def stop(self) -> bool:
@@ -64,7 +72,7 @@ class GatewayManager:
                 self.process.kill()
                 await self.process.wait()
 
-            self.log_lines.append("[booa] gateway stopped")
+            self._log("[booa] gateway stopped")
             self.process = None
             self._started_at = None
 
@@ -74,7 +82,7 @@ class GatewayManager:
 
             return True
         except Exception as e:
-            self.log_lines.append(f"[booa] failed to stop gateway: {e}")
+            self._log(f"[booa] failed to stop gateway: {e}")
             return False
 
     async def restart(self) -> bool:
@@ -89,7 +97,7 @@ class GatewayManager:
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
                     import time
-                    self.log_lines.append(text)
+                    self._log(text)
                     # Track recent errors with timestamp
                     if "ERROR" in text or "credit balance" in text or "Invalid token" in text:
                         self._recent_errors.append((time.time(), text))
@@ -109,11 +117,12 @@ class GatewayManager:
         return list(self.log_lines)[-n:]
 
     async def stream_logs(self) -> AsyncGenerator[str, None]:
-        seen = len(self.log_lines)
+        seen = self.log_seq
         while True:
-            current = len(self.log_lines)
+            current = self.log_seq
             if current > seen:
-                for line in list(self.log_lines)[seen:current]:
+                new = min(current - seen, len(self.log_lines))
+                for line in list(self.log_lines)[-new:]:
                     yield line
                 seen = current
             await asyncio.sleep(0.5)
