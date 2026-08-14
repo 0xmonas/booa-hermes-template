@@ -126,6 +126,15 @@ def build_console_app(hermes_home: str, auth_limiter, extra_routes=()) -> Starle
         Route("/api/sessions/{session_id}/chat", proxy("POST", "/api/sessions/{session_id}/chat"), methods=["POST"]),
         Route("/api/sessions/{session_id}/chat/stream", proxy("POST", "/api/sessions/{session_id}/chat/stream", stream=True), methods=["POST"]),
         Route("/api/model/options", proxy("GET", "/api/model/options")),
+        # Cron jobs: manage what already exists (see it, pause, resume, run, remove).
+        # Creating/editing jobs is deliberately NOT proxied — a new recurring job is
+        # new autonomous activity and belongs behind the wallet-signed approval flow.
+        Route("/api/jobs", proxy("GET", "/api/jobs")),
+        Route("/api/jobs/{job_id}", proxy("GET", "/api/jobs/{job_id}")),
+        Route("/api/jobs/{job_id}", proxy("DELETE", "/api/jobs/{job_id}"), methods=["DELETE"]),
+        Route("/api/jobs/{job_id}/pause", proxy("POST", "/api/jobs/{job_id}/pause"), methods=["POST"]),
+        Route("/api/jobs/{job_id}/resume", proxy("POST", "/api/jobs/{job_id}/resume"), methods=["POST"]),
+        Route("/api/jobs/{job_id}/run", proxy("POST", "/api/jobs/{job_id}/run"), methods=["POST"]),
         *extra_routes,
     ]
 

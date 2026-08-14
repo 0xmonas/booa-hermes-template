@@ -35,6 +35,7 @@ class EchoHandler(http.server.BaseHTTPRequestHandler):
 
     do_GET = _echo
     do_POST = _echo
+    do_DELETE = _echo
 
     def log_message(self, *args):
         pass
@@ -92,9 +93,20 @@ class ProxyTests(unittest.TestCase):
 
     def test_excluded_paths_404(self):
         for path in ["/v1/chat/completions", "/v1/responses", "/api/cron/fire",
-                     "/api/jobs", "/p/default/v1/models", "/health/detailed"]:
+                     "/p/default/v1/models", "/health/detailed"]:
             res = self.client.post(path, headers=self.auth) if path != "/health/detailed" else self.client.get(path, headers=self.auth)
             self.assertEqual(res.status_code, 404, path)
+
+    def test_job_management_proxied_but_creation_is_not(self):
+        # Managing existing jobs is allowed; creating/editing recurring autonomous
+        # work is not — that boundary is the point, so pin it.
+        self.assertEqual(self.client.get("/api/jobs", headers=self.auth).status_code, 200)
+        self.assertEqual(self.client.post("/api/jobs/j1/pause", headers=self.auth).status_code, 200)
+        self.assertEqual(self.client.post("/api/jobs/j1/resume", headers=self.auth).status_code, 200)
+        self.assertEqual(self.client.post("/api/jobs/j1/run", headers=self.auth).status_code, 200)
+        self.assertEqual(self.client.delete("/api/jobs/j1", headers=self.auth).status_code, 200)
+        self.assertEqual(self.client.post("/api/jobs", headers=self.auth).status_code, 405)
+        self.assertEqual(self.client.patch("/api/jobs/j1", headers=self.auth).status_code, 405)
 
     def test_path_param_validation(self):
         res = self.client.get("/api/sessions/ok_session-1/messages", headers=self.auth)
