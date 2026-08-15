@@ -86,6 +86,18 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(body["cookie"], "")
         self.assertNotIn("set-cookie", {k.lower() for k in res.headers})
 
+    def test_oversized_body_413(self):
+        big = b"x" * (console_proxy.MAX_PROXY_BODY + 1)
+        res = self.client.post("/api/sessions", headers=self.auth, content=big)
+        self.assertEqual(res.status_code, 413)
+
+    def test_body_within_cap_forwards(self):
+        res = self.client.post(
+            "/api/sessions", headers=self.auth,
+            content=json.dumps({"message": "x" * 4000}).encode(),
+        )
+        self.assertEqual(res.status_code, 200)
+
     def test_query_string_forwarded(self):
         res = self.client.get("/api/sessions?limit=5&source=api_server", headers=self.auth)
         self.assertEqual(res.status_code, 200)

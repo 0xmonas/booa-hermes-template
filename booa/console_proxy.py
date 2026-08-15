@@ -23,6 +23,10 @@ ALLOWED_ORIGINS = _DEFAULT_ORIGINS + [
     if o.strip().startswith("https://")
 ]
 MAX_PROXY_STREAMS = 6
+# Every proxied route carries small JSON (chat messages, session ops); reading
+# request.body() unbounded would let one oversized POST OOM the container.
+# Import/export live outside this proxy with their own caps.
+MAX_PROXY_BODY = 256 * 1024
 
 _PATH_PARAM = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
 _FORWARD_REQUEST_HEADERS = frozenset({
@@ -68,7 +72,17 @@ def build_console_app(hermes_home: str, auth_limiter, extra_routes=()) -> Starle
                 if k.lower() in _FORWARD_REQUEST_HEADERS
             }
             headers["Authorization"] = f"Bearer {console_auth.get_or_create_api_server_key(hermes_home)}"
-            body = await request.body()
+            declared = request.headers.get("content-length", "")
+            if declared.isdigit() and int(declared) > MAX_PROXY_BODY:
+                return JSONResponse({"error": "request too large"}, status_code=413)
+            chunks = []
+            received = 0
+            async for chunk in request.stream():
+                received += len(chunk)
+                if received > MAX_PROXY_BODY:
+                    return JSONResponse({"error": "request too large"}, status_code=413)
+                chunks.append(chunk)
+            body = b"".join(chunks)
 
             try:
                 if stream:
