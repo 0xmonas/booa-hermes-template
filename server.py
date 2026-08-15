@@ -1096,6 +1096,26 @@ async def console_meta(request: Request):
     })
 
 
+async def console_commands(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    try:
+        # The exact registry Telegram's "/" menu is built from — core gateway
+        # commands, plugin commands, and skill commands, same filters applied.
+        from hermes_cli.commands import telegram_menu_commands
+        pairs, hidden = telegram_menu_commands(max_commands=100)
+    except Exception:
+        return JSONResponse({"error": "command registry unavailable"}, status_code=501)
+    return JSONResponse({
+        "commands": [
+            {"command": "/" + str(name).lstrip("/"), "description": str(desc)}
+            for name, desc in pairs
+        ],
+        "hidden": int(hidden),
+    })
+
+
 async def console_gateway_restart(request: Request):
     denied = check_console_access(HERMES_HOME, auth_limiter, request)
     if denied:
@@ -1202,6 +1222,7 @@ routes = [
     Route("/api/wallet/link-code", wallet_link_code_post, methods=["POST"]),
     Mount("/console", app=build_console_app(HERMES_HOME, auth_limiter, extra_routes=[
         Route("/meta", console_meta),
+        Route("/commands", console_commands),
         Route("/gateway/restart", console_gateway_restart, methods=["POST"]),
         Route("/logs/stream", console_logs_stream),
         Route("/onchain-settings", console_onchain_get),

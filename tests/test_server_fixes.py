@@ -21,6 +21,7 @@ os.environ.setdefault("BOOA_LOGIN_THROTTLE_SECONDS", "0")
 from starlette.testclient import TestClient
 
 import server
+from booa import console_auth
 from booa.writer import TEMPLATE_VERSION
 
 
@@ -139,6 +140,44 @@ class ServerFixTests(unittest.TestCase):
             self.assertEqual(client.get("/api/wallet/status").status_code, 401)
         finally:
             server.ADMIN_PASSWORD = original
+
+
+class ConsoleCommandsTests(unittest.TestCase):
+    def setUp(self):
+        home = os.environ["HERMES_HOME"]
+        console_auth.set_console_enabled(home, True)
+        self.auth = {"Authorization": f"Bearer {console_auth.get_or_create_console_key(home)}"}
+        self.client = TestClient(server.app)
+
+    def tearDown(self):
+        console_auth.set_console_enabled(os.environ["HERMES_HOME"], False)
+        for mod in ("hermes_cli.commands", "hermes_cli"):
+            sys.modules.pop(mod, None)
+
+    def test_requires_console_key(self):
+        self.assertEqual(self.client.get("/console/commands").status_code, 401)
+
+    def test_501_without_the_registry(self):
+        res = self.client.get("/console/commands", headers=self.auth)
+        self.assertEqual(res.status_code, 501)
+
+    def test_manifest_mirrors_the_telegram_menu(self):
+        import types
+
+        pkg = types.ModuleType("hermes_cli")
+        mod = types.ModuleType("hermes_cli.commands")
+        mod.telegram_menu_commands = lambda max_commands=100: (
+            [("help", "Show available commands"), ("ows_pitfalls", "Known pitfalls")], 2,
+        )
+        pkg.commands = mod
+        sys.modules["hermes_cli"] = pkg
+        sys.modules["hermes_cli.commands"] = mod
+        res = self.client.get("/console/commands", headers=self.auth)
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertEqual(body["hidden"], 2)
+        self.assertEqual(body["commands"][0], {"command": "/help", "description": "Show available commands"})
+        self.assertEqual(body["commands"][1]["command"], "/ows_pitfalls")
 
 
 if __name__ == "__main__":
