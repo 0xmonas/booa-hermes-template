@@ -27,7 +27,7 @@ from eth_abi import decode as abi_decode, encode as abi_encode
 from eth_utils import keccak, to_bytes, to_checksum_address
 from mcp.server.fastmcp import FastMCP
 
-from . import wallet_status
+from . import approvals, wallet_status
 
 MAX_UINT256 = (1 << 256) - 1
 # OWS addresses EVM chains by CAIP-2 id; it has RPCs configured for both.
@@ -794,6 +794,9 @@ if _writes_enabled():
             return {"ok": False, "error": "No agent wallet set."}
         if not confirm:
             return {"ok": True, "preview": {"action": "x402_pay", "url": url, "method": method}, "note": "Not paid. confirm=true to pay and fetch."}
+        approval = approvals.gate({"tool": "x402_pay", "url": url, "method": method, "body": body})
+        if approval:
+            return approval
         try:
             cmd = [OWS_BIN, "pay", "request", "--wallet", w["name"], "--method", method]
             if body:
@@ -850,6 +853,10 @@ if _writes_enabled():
                 return {"ok": False, "error": f"Simulation failed, not buying: {sim_err[:200]}", "preview": preview}
             if not confirm:
                 return {"ok": True, "preview": preview, "note": "Simulated OK, nothing bought. Show this to the operator, then confirm=true to buy."}
+            approval = approvals.gate({"tool": "opensea_buy", "chain": chain, "order_hash": order_hash,
+                                       "nft": nft, "price_eth": str(native_eth)})
+            if approval:
+                return approval
             _check_caps(native_eth)
             unsigned, _ = _build_unsigned_1559(chain, owner, to, value, data)
             txh = _ows_send(chain, w["name"], unsigned)
@@ -897,6 +904,10 @@ if _writes_enabled():
                        "approves_collection_to_conduit": any("approval" in x["name"].lower() for x in tx_steps)}
             if not confirm:
                 return {"ok": True, "preview": preview, "note": "Nothing listed. This SELLS your NFT at this price — show it to the operator, then confirm=true to approve (if needed), sign, and publish."}
+            approval = approvals.gate({"tool": "opensea_list", "chain": chain, "contract": to_checksum_address(contract),
+                                       "token_id": str(token_id), "price_eth": str(price_eth)})
+            if approval:
+                return approval
             done = []
             for x in tx_steps:  # approval / cancel — ready calldata, OWS-signed
                 unsigned, _ = _build_unsigned_1559(chain, owner, x["to"], x["value"], x["data"])
@@ -944,6 +955,10 @@ if _writes_enabled():
             }
             if not confirm:
                 return {"ok": True, "preview": preview, "note": "Nothing sold. Verify the offer amount you are accepting, then confirm=true to approve (if needed) and accept."}
+            approval = approvals.gate({"tool": "accept_offer", "chain": chain, "order_hash": order_hash,
+                                       "nft": f"{nft_c} #{token_id}"})
+            if approval:
+                return approval
             done = []
             if not approved:
                 appr = "0x" + _selector("setApprovalForAll(address,bool)").hex() + abi_encode(["address", "bool"], [OPENSEA_CONDUIT, True]).hex()
