@@ -16,8 +16,49 @@ import httpx
 import uvicorn
 from starlette.applications import Starlette
 from starlette.background import BackgroundTask
+from starlette.datastructures import MutableHeaders
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
+
+# All page scripts are external files under /static, so script-src can stay
+# 'self' with no inline allowance — an injected <script> or on*= handler is
+# inert. Styles are inline throughout the templates (style injection cannot
+# execute script), and the wallet QR is a data: image.
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "font-src 'self'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'; "
+    "object-src 'none'"
+)
+
+
+class SecurityHeadersMiddleware:
+    """Add CSP + framing/sniffing headers to every response, streaming included."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["Content-Security-Policy"] = _CSP
+                headers["X-Frame-Options"] = "DENY"
+                headers["X-Content-Type-Options"] = "nosniff"
+                headers["Referrer-Policy"] = "no-referrer"
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from starlette.routing import Route, Mount
@@ -1433,13 +1474,16 @@ async def lifespan(app):
 
 app = Starlette(
     routes=routes,
-    middleware=[Middleware(
-        SessionMiddleware,
-        secret_key=SESSION_SECRET,
-        https_only=os.environ.get("BOOA_INSECURE_COOKIES") != "1",
-        same_site="lax",
-        max_age=24 * 60 * 60,
-    )],
+    middleware=[
+        Middleware(SecurityHeadersMiddleware),
+        Middleware(
+            SessionMiddleware,
+            secret_key=SESSION_SECRET,
+            https_only=os.environ.get("BOOA_INSECURE_COOKIES") != "1",
+            same_site="lax",
+            max_age=24 * 60 * 60,
+        ),
+    ],
     lifespan=lifespan,
 )
 

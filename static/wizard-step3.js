@@ -1,0 +1,33 @@
+const models = [
+  { value: "anthropic/claude-haiku-4.5",     label: "Claude Haiku 4.5 (recommended)", info: "$1/$5 per MTok — fast, reliable tool use" },
+  { value: "anthropic/claude-sonnet-4.6",    label: "Claude Sonnet 4.6",              info: "$3/$15 per MTok — fast + smart" },
+  { value: "anthropic/claude-opus-4.6",      label: "Claude Opus 4.6",                info: "$5/$25 per MTok — intelligent, 1M context" },
+  { value: "anthropic/claude-opus-4.7",      label: "Claude Opus 4.7",                info: "$5/$25 per MTok — most intelligent" },
+  { value: "openai/gpt-4o-mini",             label: "GPT-4o Mini",                    info: "$0.15/$0.60 per MTok — budget" },
+  { value: "openai/gpt-4o",                  label: "GPT-4o",                         info: "$2.50/$10 per MTok" },
+  { value: "openai/gpt-5.4-mini",            label: "GPT-5.4 Mini",                   info: "$0.75/$4.50 per MTok — fast OpenAI" },
+  { value: "openai/gpt-5.4",                 label: "GPT-5.4",                        info: "$2.50/$15 per MTok — top OpenAI" },
+  { value: "openai/o4-mini",                 label: "o4 Mini",                        info: "Fast reasoning model" },
+  { value: "openai/gpt-oss-120b:free",       label: "GPT-OSS 120B (free)",            info: "Free — open-weight OpenAI with native tool use" },
+  { value: "deepseek/deepseek-v3.2",         label: "DeepSeek V3.2",                  info: "$0.26/$0.38 per MTok — budget with tool use" },
+  { value: "google/gemini-2.5-pro",          label: "Gemini 2.5 Pro",                 info: "$1.25/$5 per MTok — 1M context, fast" },
+  { value: "google/gemini-2.5-flash",        label: "Gemini 2.5 Flash",               info: "$0.10/$0.40 per MTok — cheap + fast" },
+  { value: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B",                info: "$0.40/$0.40 per MTok — open-weight Meta" },
+  { value: "mistralai/mistral-large-2411",   label: "Mistral Large",                  info: "$2/$6 per MTok — European, good tool use" },
+];
+
+(function populate() {
+  const select = document.getElementById('model');
+  const info = document.getElementById('model-info');
+  models.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.value;
+    opt.textContent = m.label;
+    select.appendChild(opt);
+  });
+  info.textContent = models[0].info;
+  select.onchange = () => {
+    const selected = models.find(m => m.value === select.value);
+    info.textContent = selected ? selected.info : '';
+  };
+})();
