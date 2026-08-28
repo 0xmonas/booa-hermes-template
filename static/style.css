@@ -296,6 +296,46 @@ button:hover, .btn:hover { opacity: 0.7; }
 
 .info-box strong { color: var(--fg); }
 
+/* Model picker combobox */
+.combo { position: relative; }
+
+.combo-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  max-height: 240px;
+  overflow-y: auto;
+  display: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(168, 168, 168, 0.25) transparent;
+}
+
+.combo-list.open { display: block; }
+
+.combo-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+
+.combo-item:last-child { border-bottom: none; }
+.combo-item:hover, .combo-item.active { background: rgba(255, 255, 255, 0.05); }
+
+.combo-name { font-size: 11px; color: var(--fg); }
+.combo-id { font-size: 10px; color: var(--muted); }
+.combo-price { font-size: 10px; color: var(--muted); white-space: nowrap; }
+
+.combo-empty { padding: 10px; font-size: 10px; color: var(--muted); }
+
 /* Log viewer */
 .log-viewer {
   background: var(--bg);

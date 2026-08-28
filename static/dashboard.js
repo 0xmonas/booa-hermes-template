@@ -309,26 +309,66 @@ async function saveOnchainSettings() {
 
 function fmtPerMTok(v) {
   const n = parseFloat(v);
-  return Number.isFinite(n) ? '$' + (n * 1e6).toFixed(2) : '?';
+  return Number.isFinite(n) ? '$' + (n * 1e6).toFixed(2).replace(/\.?0+$/, '') : '?';
+}
+
+let modelCatalog = [];
+let modelActiveIdx = -1;
+
+function modelDd() { return document.getElementById('model-dd'); }
+
+function renderModelList(query) {
+  const dd = modelDd();
+  const q = query.trim().toLowerCase();
+  const hits = modelCatalog.filter(m =>
+    m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+  modelActiveIdx = hits.length ? 0 : -1;
+  if (!hits.length) {
+    dd.innerHTML = '<div class="combo-empty">No match — a raw provider/model id also works.</div>';
+  } else {
+    dd.innerHTML = hits.slice(0, 250).map((m, i) => `
+      <div class="combo-item${i === 0 ? ' active' : ''}" data-action="model-pick" data-model-id="${esc(m.id)}">
+        <div>
+          <div class="combo-name">${esc(m.name)}</div>
+          <div class="combo-id">${esc(m.id)}</div>
+        </div>
+        <div class="combo-price">${fmtPerMTok(m.prompt_price)}/${fmtPerMTok(m.completion_price)} MTok</div>
+      </div>
+    `).join('');
+  }
+  dd.classList.add('open');
+}
+
+function moveModelActive(delta) {
+  const items = [...modelDd().querySelectorAll('.combo-item')];
+  if (!items.length) return;
+  modelActiveIdx = Math.min(items.length - 1, Math.max(0, modelActiveIdx + delta));
+  items.forEach((el, i) => el.classList.toggle('active', i === modelActiveIdx));
+  items[modelActiveIdx].scrollIntoView({ block: 'nearest' });
+}
+
+function pickModel(id) {
+  document.getElementById('model-input').value = id;
+  modelDd().classList.remove('open');
 }
 
 async function openModelBox() {
   const box = document.getElementById('model-box');
-  box.style.display = box.style.display === 'none' ? '' : 'none';
-  if (box.style.display === 'none') return;
-  const dl = document.getElementById('model-list');
+  const hidden = box.style.display === 'none';
+  box.style.display = hidden ? '' : 'none';
+  if (!hidden) return;
+  const input = document.getElementById('model-input');
   const result = document.getElementById('model-result');
-  document.getElementById('model-input').value = document.getElementById('current-model').textContent.trim();
-  if (dl.children.length) return;
+  input.value = document.getElementById('current-model').textContent.trim();
+  input.focus();
+  if (modelCatalog.length) { renderModelList(''); return; }
   result.textContent = 'Loading the OpenRouter catalog…';
   try {
     const res = await fetch('/api/models');
     if (!res.ok) throw 0;
-    const d = await res.json();
-    dl.innerHTML = (d.models || []).map(m =>
-      `<option value="${esc(m.id)}">${esc(m.name)} — ${fmtPerMTok(m.prompt_price)}/${fmtPerMTok(m.completion_price)} per MTok</option>`
-    ).join('');
-    result.textContent = `${(d.models || []).length} tool-capable models, newest first.`;
+    modelCatalog = (await res.json()).models || [];
+    result.textContent = `${modelCatalog.length} tool-capable models, newest first.`;
+    renderModelList('');
   } catch (e) {
     result.textContent = 'Catalog unavailable — type a model id manually (provider/model).';
   }
@@ -338,6 +378,7 @@ async function saveModel() {
   const model = document.getElementById('model-input').value.trim();
   const result = document.getElementById('model-result');
   if (!model) return;
+  modelDd().classList.remove('open');
   result.textContent = 'Saving…';
   const res = await fetch('/api/model', {
     method: 'POST',
@@ -354,6 +395,30 @@ async function saveModel() {
     await fetch('/gateway/start', { method: 'POST' });
     result.textContent = 'Saved — gateway restarted.';
   }
+}
+
+function initModelCombo() {
+  const input = document.getElementById('model-input');
+  if (!input) return;
+  input.addEventListener('input', () => renderModelList(input.value));
+  input.addEventListener('focus', () => { if (modelCatalog.length) renderModelList(input.value); });
+  input.addEventListener('keydown', (e) => {
+    const dd = modelDd();
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveModelActive(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); moveModelActive(-1); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      const active = dd.querySelector('.combo-item.active');
+      if (dd.classList.contains('open') && active) pickModel(active.dataset.modelId);
+    } else if (e.key === 'Escape') {
+      dd.classList.remove('open');
+    }
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.combo') && !e.target.closest('[data-action="model-change"]')) {
+      modelDd().classList.remove('open');
+    }
+  });
 }
 
 let consoleKeyRevealed = false;
@@ -413,6 +478,8 @@ const ACTIONS = {
   'onchain-save': el => saveOnchainSettings(),
   'model-change': el => openModelBox(),
   'model-save': el => saveModel(),
+  'model-cancel': el => { document.getElementById('model-box').style.display = 'none'; },
+  'model-pick': el => pickModel(el.dataset.modelId),
   'console-copy-url': el => copyConsoleUrl(),
   'console-toggle-key': el => toggleConsoleKey(),
   'console-copy-key': el => copyConsoleKey(),
@@ -435,6 +502,7 @@ document.addEventListener('click', (e) => {
   fn(el);
 });
 
+initModelCombo();
 setInterval(() => { checkPairing(); checkErrors(); renderWalletStatus(); }, 3000);
 checkPairing();
 checkErrors();

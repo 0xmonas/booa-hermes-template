@@ -71,12 +71,15 @@
   </div>
   <div id="model-box" style="display:none;" class="mt-2">
     <div class="info-box text-xs">
-      Any tool-capable OpenRouter model, newest first — start typing to filter. Applies after a gateway restart. You can also switch per-chat with <code>/model</code> in Telegram or the booa.app console.
+      Any tool-capable OpenRouter model, newest first — type to filter, ↑ ↓ and Enter to pick. Applies after a gateway restart. Per-chat switching stays on <code>/model</code> in Telegram or the booa.app console.
     </div>
-    <input id="model-input" list="model-list" placeholder="e.g. anthropic/claude-sonnet-4.6" style="width:100%;font-family:monospace;" class="mt-1">
-    <datalist id="model-list"></datalist>
-    <div class="flex gap-2 mt-1" style="align-items:center;">
+    <div class="combo">
+      <input id="model-input" placeholder="e.g. anthropic/claude-sonnet-5" autocomplete="off" spellcheck="false">
+      <div id="model-dd" class="combo-list"></div>
+    </div>
+    <div class="flex gap-2 mt-2 items-center">
       <button data-action="model-save" class="btn-sm">Save &amp; restart</button>
+      <button data-action="model-cancel" class="btn-sm btn-outline">Cancel</button>
       <span id="model-result" class="text-xs text-muted"></span>
     </div>
   </div>
