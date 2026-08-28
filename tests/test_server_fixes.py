@@ -180,5 +180,36 @@ class ConsoleCommandsTests(unittest.TestCase):
         self.assertEqual(body["commands"][1]["command"], "/ows_pitfalls")
 
 
+class ConsoleWalletLinkTests(unittest.TestCase):
+    def setUp(self):
+        home = os.environ["HERMES_HOME"]
+        console_auth.set_console_enabled(home, True)
+        self.auth = {"Authorization": f"Bearer {console_auth.get_or_create_console_key(home)}"}
+        self.client = TestClient(server.app)
+
+    def tearDown(self):
+        console_auth.set_console_enabled(os.environ["HERMES_HOME"], False)
+
+    def test_requires_console_key(self):
+        self.assertEqual(self.client.post("/console/wallet/link-code", json={}).status_code, 401)
+
+    def test_console_key_alone_cannot_mint_a_signature(self):
+        res = self.client.post("/console/wallet/link-code", json={}, headers=self.auth)
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["error"], "admin_password_required")
+
+    def test_admin_password_reaches_the_link_builder(self):
+        from unittest import mock
+        with mock.patch.object(server, "_wallet_link_payload",
+                               return_value=({"ok": True, "blob": "abc", "url": "https://booa.app/bridge?link=abc"}, 200)):
+            res = self.client.post(
+                "/console/wallet/link-code",
+                json={"admin_password": os.environ["ADMIN_PASSWORD"]},
+                headers=self.auth,
+            )
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertTrue(res.json()["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()

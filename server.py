@@ -411,9 +411,14 @@ async def logs_stream(request: Request):
     if not require_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
+    # Same redaction as the console stream — the dashboard operator is trusted,
+    # but raw gateway stdout can echo provider keys and wallet material that
+    # should never reach a browser (extensions, shoulder surfing, screenshots).
+    clean = _build_log_cleaner("dashboard-logs")
+
     async def generate():
         async for line in gateway.stream_logs():
-            yield f"data: {line}\n\n"
+            yield f"data: {clean(line)}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -802,23 +807,80 @@ async def wallet_verify_post(request: Request):
     return JSONResponse(result, status_code=status)
 
 
+def _wallet_link_payload() -> tuple[dict, int]:
+    tc = _token_chain_from_wizard()
+    if tc is None:
+        return {"ok": False, "error": "setup incomplete"}, 400
+    token_id, chain_id = tc
+    info = wallet_status._read_local_wallet_info(HERMES_HOME)
+    if not info or not info.get("address"):
+        return {"ok": False, "error": "No agent wallet yet. Create one with OWS first."}, 400
+    result = agent_wallet_link.build_link_blob(
+        chain_id, token_id, info.get("name") or "my-agent", info["address"],
+    )
+    return result, 200 if result.get("ok") else 400
+
+
 async def wallet_link_code_post(request: Request):
     """Produce the setAgentWallet link code the operator pastes into the BOOA Bridge."""
     if not require_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    tc = _token_chain_from_wizard()
-    if tc is None:
-        return JSONResponse({"ok": False, "error": "setup incomplete"}, status_code=400)
-    token_id, chain_id = tc
-    info = wallet_status._read_local_wallet_info(HERMES_HOME)
-    if not info or not info.get("address"):
-        return JSONResponse({"ok": False, "error": "No agent wallet yet. Create one with OWS first."}, status_code=400)
-    result = agent_wallet_link.build_link_blob(
-        chain_id, token_id, info.get("name") or "my-agent", info["address"],
-    )
+    result, status = _wallet_link_payload()
     if result.get("ok") and result.get("url"):
         result["qr"] = _qr_svg_datauri(result["url"])
+    return JSONResponse(result, status_code=status)
+
+
+async def console_approvals_list(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    from booa import approvals as _approvals
+    return JSONResponse({
+        "required": _approvals.approvals_required(),
+        "domain": {"name": _approvals.DOMAIN_NAME, "version": _approvals.DOMAIN_VERSION},
+        "approvals": _approvals.list_records(),
+    })
+
+
+async def console_approvals_approve(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid body"}, status_code=400)
+    approval_id = str(request.path_params.get("approval_id") or "")
+    signature = str(body.get("signature") or "")
+    if not approval_id or not signature.startswith("0x") or len(signature) > 300:
+        return JSONResponse({"error": "invalid request"}, status_code=400)
+    from booa import approvals as _approvals
+    # No admin password here: the controller wallet's EIP-712 signature, checked
+    # against the current onchain owner, is a strictly stronger authorization.
+    result = _approvals.approve(approval_id, signature)
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+async def console_wallet_link_code(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    # Minting a fresh OWS wallet consent is a widening operation — a leaked
+    # console key alone must never be able to produce signatures.
+    supplied = str(body.get("admin_password") or "")
+    if not secrets.compare_digest(supplied.encode(), ADMIN_PASSWORD.encode()):
+        return JSONResponse(
+            {"error": "admin_password_required",
+             "detail": "Generating a wallet link signature needs the admin password."},
+            status_code=403,
+        )
+    result, status = _wallet_link_payload()
+    return JSONResponse(result, status_code=status)
 
 
 def _qr_svg_datauri(data: str):
@@ -1125,13 +1187,7 @@ async def console_gateway_restart(request: Request):
     return JSONResponse({"ok": bool(ok), "running": gateway.is_running})
 
 
-async def console_logs_stream(request: Request):
-    denied = check_console_access(HERMES_HOME, auth_limiter, request)
-    if denied:
-        return denied
-    if _log_stream_count["count"] >= 2:
-        return JSONResponse({"error": "too many streams"}, status_code=429)
-
+def _build_log_cleaner(channel: str):
     private_hashes = output_filter.compute_file_hashes([
         os.path.join(HERMES_HOME, "memories", "USER.md"),
         os.path.join(HERMES_HOME, "memories", "MEMORY.md"),
@@ -1151,9 +1207,21 @@ async def console_logs_stream(request: Request):
 
     def clean(line: str) -> str:
         return output_filter.filter_output(
-            line, channel="console-logs",
+            line, channel=channel,
             private_file_hashes=private_hashes, deny_list=deny,
         ).text
+
+    return clean
+
+
+async def console_logs_stream(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    if _log_stream_count["count"] >= 2:
+        return JSONResponse({"error": "too many streams"}, status_code=429)
+
+    clean = _build_log_cleaner("console-logs")
 
     async def generate():
         _log_stream_count["count"] += 1
@@ -1223,6 +1291,9 @@ routes = [
     Mount("/console", app=build_console_app(HERMES_HOME, auth_limiter, extra_routes=[
         Route("/meta", console_meta),
         Route("/commands", console_commands),
+        Route("/wallet/link-code", console_wallet_link_code, methods=["POST"]),
+        Route("/approvals", console_approvals_list),
+        Route("/approvals/{approval_id}", console_approvals_approve, methods=["POST"]),
         Route("/gateway/restart", console_gateway_restart, methods=["POST"]),
         Route("/logs/stream", console_logs_stream),
         Route("/onchain-settings", console_onchain_get),
