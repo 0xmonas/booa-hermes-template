@@ -702,7 +702,7 @@ async def console_onchain_post(request: Request):
     with open(_ONCHAIN_PATH, "w") as f:
         json.dump(cur, f, indent=2)
     try:
-        os.chmod(_ONCHAIN_PATH, 0o600)
+        os.chmod(_ONCHAIN_PATH, 0o644)
     except OSError:
         pass
     refresh_mcp_config(HERMES_HOME)
@@ -1073,7 +1073,7 @@ async def onchain_settings_post(request: Request):
     with open(_ONCHAIN_PATH, "w") as f:
         json.dump(cur, f, indent=2)
     try:
-        os.chmod(_ONCHAIN_PATH, 0o600)
+        os.chmod(_ONCHAIN_PATH, 0o644)
     except OSError:
         pass
     refresh_mcp_config(HERMES_HOME)  # rebuild config.yaml mcp_servers from the new settings

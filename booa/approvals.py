@@ -108,6 +108,21 @@ def resolve_controller() -> Optional[str]:
     return controller.lower() if isinstance(controller, str) and controller.startswith("0x") else None
 
 
+def _hand_to_agent(path: str) -> None:
+    """The store is written by both the root admin server (approve) and the
+    agent-uid MCP process (gate/consume). A root write replaces the file
+    root-owned, which would lock the MCP out — hand it back every time."""
+    if os.geteuid() != 0:
+        return
+    try:
+        import pwd
+        rec = pwd.getpwnam("agent")
+        os.chown(path, rec.pw_uid, rec.pw_gid)
+        os.chmod(path, 0o600)
+    except (ImportError, KeyError, OSError):
+        pass
+
+
 def _atomic_write(obj: dict) -> None:
     d = os.path.dirname(_STORE) or "."
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".approvals-", suffix=".tmp")
@@ -117,6 +132,7 @@ def _atomic_write(obj: dict) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, _STORE)
+        _hand_to_agent(_STORE)
     except Exception:
         try:
             os.unlink(tmp)
@@ -126,7 +142,10 @@ def _atomic_write(obj: dict) -> None:
 
 
 def _locked(fn):
+    existed = os.path.exists(_LOCK)
     with open(_LOCK, "a") as lk:
+        if not existed:
+            _hand_to_agent(_LOCK)
         fcntl.flock(lk, fcntl.LOCK_EX)
         try:
             try:

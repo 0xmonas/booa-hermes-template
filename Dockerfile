@@ -3,6 +3,11 @@ FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl ripgrep && rm -rf /var/lib/apt/lists/*
 
+# The gateway (and with it the agent's shell) runs as this unprivileged user;
+# the admin server stays root. /app and server secrets are out of its reach,
+# and /proc/<server>/environ becomes unreadable to the agent.
+RUN useradd --uid 1000 --no-create-home --home-dir /data agent
+
 WORKDIR /app
 
 # Install Hermes Agent from GitHub (not on PyPI). Pinned to a release tag for
