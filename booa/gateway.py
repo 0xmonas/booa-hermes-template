@@ -42,6 +42,21 @@ def runtime_user() -> Optional[tuple[int, int]]:
         return None
 
 
+def hand_file_to_agent(path: str) -> None:
+    """Give one server-written runtime file to the agent user right away.
+
+    For files the gateway reads while running (the pairing store above all):
+    a root write leaves them root-owned 0600, which would lock the agent-uid
+    gateway out until the next start's hand_over_data pass."""
+    user = runtime_user()
+    if user is None:
+        return
+    try:
+        os.chown(path, user[0], user[1])
+    except OSError:
+        pass
+
+
 def hand_over_data(hermes_home: str, uid: int, gid: int) -> None:
     """Give the runtime tree to the agent user, keeping server secrets root's.
 

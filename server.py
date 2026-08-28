@@ -466,9 +466,12 @@ def _read_pairing_json(path: Path) -> dict:
 
 
 def _write_pairing_json(path: Path, data: dict):
+    from booa.gateway import hand_file_to_agent
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2))
     os.chmod(path, 0o600)
+    # The agent-uid gateway checks this store on every message.
+    hand_file_to_agent(str(path))
 
 
 def _pairing_platforms() -> list[str]:
@@ -568,6 +571,83 @@ async def pairing_deny(request: Request):
         del pending[code]
         _write_pairing_json(pending_path, pending)
     return JSONResponse({"ok": True})
+
+
+# Hermes authz is a UNION of the pairing store and per-platform allowlists
+# (env TELEGRAM_ALLOWED_USERS + config.yaml allowed_users), so a real
+# revocation has to scrub all three. The store applies per message; the
+# allowlists are read at gateway start, hence restart_needed.
+_ALLOWLIST_ENV = {"telegram": "TELEGRAM_ALLOWED_USERS"}
+
+
+def _scrub_allowlists(platform: str, user_id: str) -> bool:
+    changed = False
+    env_var = _ALLOWLIST_ENV.get(platform)
+    env_path = Path(HERMES_HOME) / ".env"
+    if env_var and env_path.exists():
+        out = []
+        for line in env_path.read_text().splitlines():
+            if line.startswith(env_var + "="):
+                vals = [v.strip() for v in line.split("=", 1)[1].split(",") if v.strip()]
+                kept = [v for v in vals if v != user_id]
+                if kept != vals:
+                    changed = True
+                if kept:
+                    out.append(f"{env_var}={','.join(kept)}")
+            else:
+                out.append(line)
+        if changed:
+            env_path.write_text("\n".join(out) + "\n")
+            os.chmod(env_path, 0o600)
+
+    config_path = Path(HERMES_HOME) / "config.yaml"
+    if config_path.exists():
+        try:
+            import yaml
+            cfg = yaml.safe_load(config_path.read_text()) or {}
+            plat = ((cfg.get("gateway") or {}).get("platforms") or {}).get(platform)
+            if isinstance(plat, dict) and "allowed_users" in plat:
+                au = plat["allowed_users"]
+                vals = [str(v).strip() for v in (au if isinstance(au, list) else str(au).split(","))]
+                vals = [v for v in vals if v]
+                kept = [v for v in vals if v != user_id]
+                if kept != vals:
+                    if kept:
+                        plat["allowed_users"] = kept if isinstance(au, list) else ",".join(kept)
+                    else:
+                        del plat["allowed_users"]
+                    config_path.write_text(yaml.dump(cfg, default_flow_style=False))
+                    os.chmod(config_path, 0o600)
+                    changed = True
+        except Exception:
+            pass
+    return changed
+
+
+async def pairing_unpair(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    platform = str(body.get("platform") or "").strip().lower()
+    user_id = str(body.get("user_id") or "").strip()
+    if not re.fullmatch(r"[a-z0-9_]{1,32}", platform) or not re.fullmatch(r"[A-Za-z0-9_@.+:-]{1,128}", user_id):
+        return JSONResponse({"error": "platform and user_id required"}, status_code=400)
+
+    approved_path = PAIRING_DIR / f"{platform}-approved.json"
+    approved = _read_pairing_json(approved_path)
+    removed = user_id in approved
+    if removed:
+        del approved[user_id]
+        _write_pairing_json(approved_path, approved)
+
+    restart_needed = _scrub_allowlists(platform, user_id)
+    if not removed and not restart_needed:
+        return JSONResponse({"error": "User not found"}, status_code=404)
+    return JSONResponse({"ok": True, "removed": removed, "restart_needed": restart_needed})
 
 
 async def _do_export(password: str):
@@ -1283,6 +1363,7 @@ routes = [
     Route("/pairing", pairing_list),
     Route("/pairing/approve", pairing_approve, methods=["POST"]),
     Route("/pairing/deny", pairing_deny, methods=["POST"]),
+    Route("/pairing/unpair", pairing_unpair, methods=["POST"]),
     Route("/api/wallet/status", wallet_status_get),
     Route("/api/wallet/refresh", wallet_refresh, methods=["POST"]),
     Route("/api/wallet/challenge", wallet_challenge_create, methods=["POST"]),

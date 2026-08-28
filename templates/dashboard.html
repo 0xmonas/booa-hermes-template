@@ -214,6 +214,14 @@ async function checkErrors() {
   }
 }
 
+// user_name comes straight from Telegram — treat every field as hostile
+// before it touches innerHTML.
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[c]);
+}
+
 async function checkPairing() {
   const res = await fetch('/pairing');
   const data = await res.json();
@@ -226,10 +234,21 @@ async function checkPairing() {
   // Check if any users are already approved
   if (data.approved && data.approved.length > 0) {
     connected.style.display = 'block';
-    users.textContent = data.approved.map(u => u.user_name || u.user_id).join(', ');
+    users.innerHTML = data.approved.map(u => `
+      <div class="flex items-center justify-between" style="padding:6px 0;">
+        <span>${esc(u.user_name || u.user_id)}<span class="text-xs text-muted"> — ${esc(u.platform)}</span></span>
+        <button class="btn-sm btn-outline" data-unpair-platform="${esc(u.platform)}" data-unpair-user="${esc(u.user_id)}">Unpair</button>
+      </div>
+    `).join('');
+    users.querySelectorAll('button[data-unpair-user]').forEach(btn => {
+      btn.addEventListener('click', () => unpairUser(btn.dataset.unpairPlatform, btn.dataset.unpairUser));
+    });
     if (!data.pending || data.pending.length === 0) {
       setup.style.display = 'none';
     }
+  } else {
+    connected.style.display = 'none';
+    setup.style.display = 'block';
   }
 
   if (data.pending && data.pending.length > 0) {
@@ -238,12 +257,12 @@ async function checkPairing() {
     pending.innerHTML = data.pending.map(p => `
       <div class="flex items-center justify-between" style="padding:8px 0;border-bottom:1px solid var(--border);">
         <div>
-          <strong>${p.user_name || 'Unknown'}</strong>
-          <span class="text-xs text-muted"> — code: ${p.code} — ${p.age_minutes}m ago</span>
+          <strong>${esc(p.user_name || 'Unknown')}</strong>
+          <span class="text-xs text-muted"> — code: ${esc(p.code)} — ${esc(p.age_minutes)}m ago</span>
         </div>
         <div class="flex gap-1">
-          <button onclick="pairingAction('approve','${p.platform}','${p.code}')" class="btn-sm">Approve</button>
-          <button onclick="pairingAction('deny','${p.platform}','${p.code}')" class="btn-sm btn-outline">Deny</button>
+          <button onclick="pairingAction('approve','${esc(p.platform)}','${esc(p.code)}')" class="btn-sm">Approve</button>
+          <button onclick="pairingAction('deny','${esc(p.platform)}','${esc(p.code)}')" class="btn-sm btn-outline">Deny</button>
         </div>
       </div>
     `).join('');
@@ -251,6 +270,22 @@ async function checkPairing() {
     empty.style.display = 'block';
     pending.innerHTML = '';
   }
+}
+
+async function unpairUser(platform, userId) {
+  if (!confirm(`Unpair this ${platform} user? They lose access to your agent.`)) return;
+  const res = await fetch('/pairing/unpair', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ platform, user_id: userId })
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(d.error || 'Unpair failed.'); return; }
+  if (d.restart_needed && confirm('They were also in the startup allowlist. Restart the gateway now to fully revoke access?')) {
+    await fetch('/gateway/stop', { method: 'POST' });
+    await fetch('/gateway/start', { method: 'POST' });
+  }
+  checkPairing();
 }
 
 async function pairingAction(action, platform, code) {
