@@ -307,6 +307,55 @@ async function saveOnchainSettings() {
   } catch (e) { result.textContent = 'Request failed.'; }
 }
 
+function fmtPerMTok(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? '$' + (n * 1e6).toFixed(2) : '?';
+}
+
+async function openModelBox() {
+  const box = document.getElementById('model-box');
+  box.style.display = box.style.display === 'none' ? '' : 'none';
+  if (box.style.display === 'none') return;
+  const dl = document.getElementById('model-list');
+  const result = document.getElementById('model-result');
+  document.getElementById('model-input').value = document.getElementById('current-model').textContent.trim();
+  if (dl.children.length) return;
+  result.textContent = 'Loading the OpenRouter catalog…';
+  try {
+    const res = await fetch('/api/models');
+    if (!res.ok) throw 0;
+    const d = await res.json();
+    dl.innerHTML = (d.models || []).map(m =>
+      `<option value="${esc(m.id)}">${esc(m.name)} — ${fmtPerMTok(m.prompt_price)}/${fmtPerMTok(m.completion_price)} per MTok</option>`
+    ).join('');
+    result.textContent = `${(d.models || []).length} tool-capable models, newest first.`;
+  } catch (e) {
+    result.textContent = 'Catalog unavailable — type a model id manually (provider/model).';
+  }
+}
+
+async function saveModel() {
+  const model = document.getElementById('model-input').value.trim();
+  const result = document.getElementById('model-result');
+  if (!model) return;
+  result.textContent = 'Saving…';
+  const res = await fetch('/api/model', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model })
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { result.textContent = 'Failed: ' + (d.error || 'unknown'); return; }
+  document.getElementById('current-model').textContent = model;
+  result.textContent = 'Saved.';
+  if (confirm('Model saved. Restart the gateway now to apply it?')) {
+    result.textContent = 'Restarting gateway…';
+    await fetch('/gateway/stop', { method: 'POST' });
+    await fetch('/gateway/start', { method: 'POST' });
+    result.textContent = 'Saved — gateway restarted.';
+  }
+}
+
 let consoleKeyRevealed = false;
 async function loadConsoleConfig() {
   try {
@@ -362,6 +411,8 @@ const ACTIONS = {
   'wallet-linkcode': el => generateLinkCode(),
   'wallet-submit-sig': el => submitWalletSignature(),
   'onchain-save': el => saveOnchainSettings(),
+  'model-change': el => openModelBox(),
+  'model-save': el => saveModel(),
   'console-copy-url': el => copyConsoleUrl(),
   'console-toggle-key': el => toggleConsoleKey(),
   'console-copy-key': el => copyConsoleKey(),

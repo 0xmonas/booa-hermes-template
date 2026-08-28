@@ -530,6 +530,82 @@ async def gateway_errors(request: Request):
     return JSONResponse({"errors": gateway.get_recent_errors(60)})
 
 
+# OpenRouter's public catalog, trimmed to tool-capable models (the agent needs
+# function calling) and sorted newest-first, so the dashboard picker never goes
+# stale the way a hardcoded list does.
+_models_cache: dict = {"ts": 0.0, "data": []}
+_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9._/:-]{1,128}$")
+
+
+async def api_models(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    now = time.time()
+    if now - _models_cache["ts"] > 3600 or not _models_cache["data"]:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get("https://openrouter.ai/api/v1/models")
+                r.raise_for_status()
+                raw = r.json().get("data", [])
+        except Exception:
+            if not _models_cache["data"]:
+                return JSONResponse({"error": "openrouter unreachable"}, status_code=502)
+            raw = None
+        if raw is not None:
+            out = []
+            for m in raw:
+                try:
+                    if "tools" not in (m.get("supported_parameters") or []):
+                        continue
+                    model_id = str(m["id"])
+                    if not _MODEL_ID_RE.fullmatch(model_id):
+                        continue
+                    pricing = m.get("pricing") or {}
+                    out.append({
+                        "id": model_id,
+                        "name": str(m.get("name") or model_id),
+                        "created": int(m.get("created") or 0),
+                        "context_length": int(m.get("context_length") or 0),
+                        "prompt_price": str(pricing.get("prompt") or ""),
+                        "completion_price": str(pricing.get("completion") or ""),
+                    })
+                except Exception:
+                    continue
+            out.sort(key=lambda x: x["created"], reverse=True)
+            _models_cache.update(ts=now, data=out)
+    return JSONResponse({"models": _models_cache["data"]})
+
+
+async def api_model_set(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid body"}, status_code=400)
+    model = str(body.get("model") or "").strip()
+    if not _MODEL_ID_RE.fullmatch(model):
+        return JSONResponse({"error": "invalid model id"}, status_code=400)
+
+    config_path = Path(HERMES_HOME) / "config.yaml"
+    if not config_path.exists():
+        return JSONResponse({"error": "setup incomplete"}, status_code=400)
+    try:
+        import yaml
+        cfg = yaml.safe_load(config_path.read_text()) or {}
+        cfg.setdefault("model", {})["default"] = model
+        cfg["model"].setdefault("provider", "openrouter")
+        # write_text truncates in place, so the agent user keeps ownership of
+        # its own config after the v1.2.1 handover.
+        config_path.write_text(yaml.dump(cfg, default_flow_style=False))
+        os.chmod(config_path, 0o600)
+    except Exception:
+        return JSONResponse({"error": "could not update config"}, status_code=500)
+    wizard_data["model"] = model
+    return JSONResponse({"ok": True, "model": model, "restart_needed": True,
+                         "note": "The gateway reads the model at start — restart to apply."})
+
+
 async def pairing_list(request: Request):
     if not require_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -1405,6 +1481,8 @@ routes = [
     Route("/pairing/approve", pairing_approve, methods=["POST"]),
     Route("/pairing/deny", pairing_deny, methods=["POST"]),
     Route("/pairing/unpair", pairing_unpair, methods=["POST"]),
+    Route("/api/models", api_models),
+    Route("/api/model", api_model_set, methods=["POST"]),
     Route("/api/wallet/status", wallet_status_get),
     Route("/api/wallet/refresh", wallet_refresh, methods=["POST"]),
     Route("/api/wallet/challenge", wallet_challenge_create, methods=["POST"]),

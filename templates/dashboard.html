@@ -60,7 +60,7 @@
 
   <div class="stat-grid">
     <div class="stat"><strong>Provider:</strong> {{ data.get('provider', '?') }}</div>
-    <div class="stat"><strong>Model:</strong> {{ data.get('model', '?') }}</div>
+    <div class="stat"><strong>Model:</strong> <span id="current-model">{{ data.get('model', '?') }}</span> <span data-action="model-change" style="cursor:pointer;color:var(--muted);text-decoration:underline;">change</span></div>
     <div class="stat"><strong>Skills:</strong> {{ ', '.join(data.get('skills_installed', [])) or 'none' }}</div>
     <div class="stat"><strong>Uptime:</strong> {{ '%dh %dm' % (uptime // 3600, (uptime % 3600) // 60) if uptime > 0 else 'stopped' }}</div>
     {% if wallet_address %}
@@ -68,6 +68,17 @@
     {% else %}
     <div class="stat"><strong>Wallet:</strong> <span class="text-muted">not set — tell your agent "set up my wallet"</span></div>
     {% endif %}
+  </div>
+  <div id="model-box" style="display:none;" class="mt-2">
+    <div class="info-box text-xs">
+      Any tool-capable OpenRouter model, newest first — start typing to filter. Applies after a gateway restart. You can also switch per-chat with <code>/model</code> in Telegram or the booa.app console.
+    </div>
+    <input id="model-input" list="model-list" placeholder="e.g. anthropic/claude-sonnet-4.6" style="width:100%;font-family:monospace;" class="mt-1">
+    <datalist id="model-list"></datalist>
+    <div class="flex gap-2 mt-1" style="align-items:center;">
+      <button data-action="model-save" class="btn-sm">Save &amp; restart</button>
+      <span id="model-result" class="text-xs text-muted"></span>
+    </div>
   </div>
 </div>
 
