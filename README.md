@@ -24,7 +24,7 @@ Your agent comes with:
 
 ### 1. Attach a volume (one-time, ~10 seconds)
 
-After clicking Deploy, Railway creates the service but **does not** attach persistent storage by default — this is intentional so that template updates don't reset your data. You need to add a volume yourself, once:
+After clicking Deploy, Railway creates the service but **does not** attach persistent storage by default. This is deliberate: a volume defined by the template is template-managed and Railway **wipes it when you update the template**, while a volume you add yourself is user-managed and survives every update (verified live). So add one yourself, once:
 
 1. Open your new service in Railway → **Settings** → **Volumes**
 2. Click **Add Volume**
