@@ -85,7 +85,7 @@ Your agent can:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ADMIN_USERNAME` | Yes | Dashboard login username |
-| `ADMIN_PASSWORD` | Yes | Dashboard login password |
+| `ADMIN_PASSWORD` | Yes | Dashboard login password. Generated for you at deploy time (32 random chars); copy it from the service's Variables and paste it into booa.app when you set up |
 | `OPENROUTER_API_KEY` | No | Model API key. The wizard asks for it once; set it here to replace or rotate it later — it syncs into the agent's config on every restart |
 | `TELEGRAM_BOT_TOKEN` | No | Same: set here to rotate the bot token after setup |
 | `OPENSEA_API_KEY` | No | Enables OpenSea search + trading tools (free key: docs.opensea.io/reference/api-keys) |
