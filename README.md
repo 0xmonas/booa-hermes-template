@@ -33,7 +33,11 @@ After clicking Deploy, Railway creates the service but **does not** attach persi
 
 Without this, your agent's memory, pairing, and wallet live only in the container's ephemeral filesystem and will disappear on redeploys.
 
-### 2. Run the wizard (4 steps)
+### 2. Finish setup from booa.app (recommended)
+
+Open [booa.app → Studio → Agent Console](https://booa.app/studio/agent-console), pick your BOOA and choose **Set up a new instance**. Paste your service URL and `ADMIN_PASSWORD`, add your OpenRouter key, pick a model, optionally a Telegram bot token. Your token ID is filled in for you and the agent boots straight into the console. The password travels only between your browser and your instance.
+
+### 2b. Or run the dashboard wizard (4 steps)
 
 Open your app URL. After login (`admin` / your `ADMIN_PASSWORD`) the wizard opens:
 
