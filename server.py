@@ -537,9 +537,7 @@ _models_cache: dict = {"ts": 0.0, "data": []}
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9._/:-]{1,128}$")
 
 
-async def api_models(request: Request):
-    if not require_auth(request):
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+async def _models_json() -> JSONResponse:
     now = time.time()
     if now - _models_cache["ts"] > 3600 or not _models_cache["data"]:
         try:
@@ -574,6 +572,19 @@ async def api_models(request: Request):
             out.sort(key=lambda x: x["created"], reverse=True)
             _models_cache.update(ts=now, data=out)
     return JSONResponse({"models": _models_cache["data"]})
+
+
+async def api_models(request: Request):
+    if not require_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return await _models_json()
+
+
+async def console_models(request: Request):
+    denied = check_console_access(HERMES_HOME, auth_limiter, request)
+    if denied:
+        return denied
+    return await _models_json()
 
 
 async def api_model_set(request: Request):
@@ -1059,6 +1070,154 @@ async def console_approvals_approve(request: Request):
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
 
+_SETUP_MAX_BODY = 64 * 1024
+_TELEGRAM_TOKEN_RE = re.compile(r"^\d{6,12}:[A-Za-z0-9_-]{30,64}$")
+
+
+async def _read_small_json(request: Request):
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > _SETUP_MAX_BODY:
+        return None
+    try:
+        body = await request.json()
+    except Exception:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+async def _admin_password_gate(request: Request, body: dict):
+    """Same rules as the login form: a correct password is never throttled,
+    wrong guesses pay the delay. These routes sit under the CORS'd /console
+    mount so booa.app can drive setup, but they are gated by the admin
+    password alone — the console key may not exist yet."""
+    ip = console_auth.client_ip(request)
+    supplied = str(body.get("admin_password") or "")
+    if supplied and secrets.compare_digest(supplied.encode(), ADMIN_PASSWORD.encode()):
+        return None
+    auth_limiter.record_failure(ip)
+    login_limiter.record_failure("global")
+    if auth_limiter.blocked(ip) or login_limiter.blocked("global"):
+        await asyncio.sleep(LOGIN_THROTTLE_SECONDS)
+    return JSONResponse({"error": "admin_password_required"}, status_code=403)
+
+
+def _instance_summary() -> dict:
+    load_wizard_data()
+    tc = _token_chain_from_wizard()
+    token_id, chain_id = tc if tc is not None else (None, BOOA_CHAIN_ID)
+    return {
+        "template_version": TEMPLATE_VERSION,
+        "setup_complete": is_setup_complete(HERMES_HOME),
+        "token_id": token_id,
+        "chain_id": chain_id,
+        "agent_name": wizard_data.get("name", ""),
+    }
+
+
+async def console_bootstrap(request: Request):
+    """Hand booa.app a console key in exchange for the admin password, so a
+    holder never has to open the dashboard to connect."""
+    body = await _read_small_json(request)
+    if body is None:
+        return JSONResponse({"error": "invalid body"}, status_code=400)
+    denied = await _admin_password_gate(request, body)
+    if denied:
+        return denied
+    console_auth.set_console_enabled(HERMES_HOME, True)
+    return JSONResponse({
+        "ok": True,
+        "console_key": console_auth.get_or_create_console_key(HERMES_HOME),
+        **_instance_summary(),
+    })
+
+
+async def console_setup(request: Request):
+    """The whole dashboard wizard in one call, driven from booa.app."""
+    body = await _read_small_json(request)
+    if body is None:
+        return JSONResponse({"error": "invalid body"}, status_code=400)
+    denied = await _admin_password_gate(request, body)
+    if denied:
+        return denied
+    if is_setup_complete(HERMES_HOME):
+        return JSONResponse({"error": "already_set_up", **_instance_summary()}, status_code=409)
+
+    try:
+        token_id = int(body.get("token_id"))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "token_id required"}, status_code=400)
+    if not 0 <= token_id <= 100_000_000:
+        return JSONResponse({"error": "token_id out of range"}, status_code=400)
+
+    api_key = str(body.get("api_key") or "").strip()
+    if not 8 <= len(api_key) <= 512 or any(c.isspace() for c in api_key):
+        return JSONResponse({"error": "api_key required"}, status_code=400)
+    model = str(body.get("model") or "anthropic/claude-haiku-4.5").strip()
+    if not _MODEL_ID_RE.fullmatch(model):
+        return JSONResponse({"error": "invalid model id"}, status_code=400)
+    telegram_token = str(body.get("telegram_token") or "").strip()
+    if telegram_token and not _TELEGRAM_TOKEN_RE.fullmatch(telegram_token):
+        return JSONResponse({"error": "invalid telegram token"}, status_code=400)
+
+    def text(key: str, limit: int, default: str = "") -> str:
+        return str(body.get(key) or default).strip()[:limit]
+
+    try:
+        booa_data = await fetch_booa_identity(token_id)
+        skills = await fetch_skills()
+    except TokenNotFound:
+        return JSONResponse({"error": f"BOOA #{token_id} not found"}, status_code=404)
+    except Exception:
+        return JSONResponse({"error": "could not fetch the agent identity"}, status_code=502)
+
+    write_soul(HERMES_HOME, booa_data["soul_md"])
+    write_identity(HERMES_HOME, booa_data["identity_md"])
+    write_avatar(HERMES_HOME, booa_data["avatar_svg"])
+    write_agent_json(HERMES_HOME, booa_data)
+    write_seed_memory(HERMES_HOME, booa_data)
+    write_skills(HERMES_HOME, skills)
+    write_security_rules(HERMES_HOME)
+    install_output_filter_hook(HERMES_HOME)
+    wizard_data.update(booa_data)
+    wizard_data["skills_installed"] = list(skills.keys())
+
+    write_user_md(HERMES_HOME, generate_user_md(
+        name=text("owner_name", 120),
+        token_id=token_id,
+        agent_name=wizard_data.get("name", ""),
+        creature=wizard_data.get("creature", ""),
+        language=text("language", 40, "English"),
+        tasks=text("tasks", 2000),
+        spending_limit=text("spending_limit", 32, "0"),
+        interests=text("interests", 2000),
+    ))
+
+    wizard_data["provider"] = "openrouter"
+    wizard_data["api_key"] = api_key
+    wizard_data["model"] = model
+    write_config(
+        HERMES_HOME,
+        provider="openrouter",
+        api_key=api_key,
+        model=model,
+        telegram_token=telegram_token,
+        telegram_users="",
+    )
+    mark_setup_complete(HERMES_HOME)
+    try:
+        wallet_status.refresh(HERMES_HOME, BOOA_CHAIN_ID, token_id)
+    except Exception:
+        pass
+    console_auth.set_console_enabled(HERMES_HOME, True)
+    started = await gateway.start()
+    return JSONResponse({
+        "ok": True,
+        "console_key": console_auth.get_or_create_console_key(HERMES_HOME),
+        "gateway_running": bool(started),
+        **_instance_summary(),
+    })
+
+
 async def console_wallet_link_code(request: Request):
     denied = check_console_access(HERMES_HOME, auth_limiter, request)
     if denied:
@@ -1491,6 +1650,9 @@ routes = [
     Mount("/console", app=build_console_app(HERMES_HOME, auth_limiter, extra_routes=[
         Route("/meta", console_meta),
         Route("/commands", console_commands),
+        Route("/models", console_models),
+        Route("/bootstrap", console_bootstrap, methods=["POST"]),
+        Route("/setup", console_setup, methods=["POST"]),
         Route("/wallet/link-code", console_wallet_link_code, methods=["POST"]),
         Route("/approvals", console_approvals_list),
         Route("/approvals/{approval_id}", console_approvals_approve, methods=["POST"]),
