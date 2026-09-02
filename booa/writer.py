@@ -6,7 +6,7 @@ import shutil
 import sys
 import yaml
 
-TEMPLATE_VERSION = "1.2.5"
+TEMPLATE_VERSION = "1.3.0"
 
 
 def ensure_dirs(hermes_home: str):
