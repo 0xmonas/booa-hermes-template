@@ -88,3 +88,35 @@ class HandOverTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EventLoopTests(unittest.TestCase):
+    def test_server_pins_the_stdlib_loop(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(gateway.__file__)))
+        with open(os.path.join(root, "server.py")) as f:
+            self.assertIn('loop="asyncio"', f.read())
+
+    def test_stdlib_loop_accepts_user_switch_kwargs(self):
+        import asyncio
+
+        async def spawn():
+            proc = await asyncio.create_subprocess_exec(
+                "true", user=os.getuid(), group=os.getgid())
+            return await proc.wait()
+
+        self.assertEqual(asyncio.run(spawn()), 0)
+
+    def test_uvloop_rejects_user_switch_kwargs(self):
+        try:
+            import uvloop
+        except ImportError:
+            self.skipTest("uvloop not installed")
+
+        async def spawn():
+            await asyncio_exec("true", user=os.getuid(), group=os.getgid())
+
+        import asyncio
+        asyncio_exec = asyncio.create_subprocess_exec
+        with self.assertRaises(ValueError):
+            uvloop.run(spawn())
+

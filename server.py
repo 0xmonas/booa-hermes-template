@@ -1730,4 +1730,4 @@ app = Starlette(
 if __name__ == "__main__":
     print(f"[booa] Starting on port {PORT}", flush=True)
     print(f"[booa] HERMES_HOME={HERMES_HOME}", flush=True)
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    uvicorn.run(app, host="0.0.0.0", port=PORT, loop="asyncio")
