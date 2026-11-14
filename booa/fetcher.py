@@ -27,6 +27,8 @@ async def fetch_booa_identity(token_id: int) -> dict:
 
     if soul.status_code == 404:
         raise TokenNotFound(f"BOOA #{token_id} not found")
+    soul.raise_for_status()
+    identity.raise_for_status()
 
     agent_data = agent_json.json() if agent_json.status_code == 200 else {}
 
