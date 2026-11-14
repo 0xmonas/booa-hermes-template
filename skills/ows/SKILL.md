@@ -61,7 +61,7 @@ Before considering the setup done, validate on-chain state. Use the token ID fro
 
 ```bash
 # Fetch current NFT owner and 8004 registration
-curl -s "https://booa.app/api/agent-registry/360/<TOKEN_ID>"
+curl -s "https://booa.app/api/agent-registry/1/<TOKEN_ID>"
 ```
 
 Check three things:
