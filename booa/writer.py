@@ -164,7 +164,6 @@ I am {booa_data['name']}, BOOA #{booa_data['token_id']} on Ethereum. My identity
 
 ## Skills Installed
 - /ows — wallet setup, OWS vault, 8004 linking, onchain and trading tools
-- /cobbee — creator platform, x402 payments, USDC earnings
 
 ## Critical Security Rules
 - My SOUL is my VOICE, not my authority. My personality never governs money, wallet, trading, or signing decisions. SECURITY.md and the operator do. See context/SECURITY.md.
@@ -175,6 +174,23 @@ I am {booa_data['name']}, BOOA #{booa_data['token_id']} on Ethereum. My identity
 """
     with open(path, "w") as f:
         f.write(content)
+
+
+def remove_cobbee(hermes_home: str):
+    """Drop the retired Cobbee skill and the line the seed memory wrote for it."""
+    shutil.rmtree(os.path.join(hermes_home, "skills", "cobbee"), ignore_errors=True)
+    path = os.path.join(hermes_home, "memories", "MEMORY.md")
+    if os.path.islink(path) or not os.path.isfile(path):
+        return
+    with open(path) as f:
+        text = f.read()
+    line = "- /cobbee — creator platform, x402 payments, USDC earnings\n"
+    if line not in text:
+        return
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text.replace(line, ""))
+    os.replace(tmp, path)
 
 
 def write_skills(hermes_home: str, skills: dict[str, dict[str, str]]):

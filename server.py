@@ -71,7 +71,7 @@ from booa.writer import (
     write_user_md, write_seed_memory, write_skills, write_config,
     generate_user_md, mark_setup_complete, is_setup_complete,
     write_security_rules, install_output_filter_hook, migrate_pairing_files,
-    refresh_mcp_config, ensure_api_server_platform, TEMPLATE_VERSION,
+    refresh_mcp_config, ensure_api_server_platform, remove_cobbee, TEMPLATE_VERSION,
 )
 from booa import wallet_status
 from booa import agent_wallet_link
@@ -1686,7 +1686,8 @@ async def lifespan(app):
         _sync_secret_env_keys()
         # Migration: secrets no longer live in onchain-settings.json.
         _scrub_onchain_secret()
-        # Refresh OUR managed skills (booa, cobbee, bundled ows) on every boot so
+        remove_cobbee(HERMES_HOME)
+        # Refresh OUR managed skills (booa, bundled ows) on every boot so
         # stale copies on old volumes get updated — e.g. pre-rebrand "khora" docs.
         # Best-effort: offline boots keep whatever is on the volume. Skills the
         # operator installed themselves are never touched.

@@ -7,7 +7,6 @@ import httpx
 
 BOOA_API = "https://booa.app/api/agent-files/1"
 BOOA_SKILLS_URL = "https://booa.app/skills"
-COBBEE_SKILLS_URL = "https://cobbee.fun/skills"
 
 # Local skills bundled with the template (read from repo at build time).
 LOCAL_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
@@ -50,17 +49,6 @@ SKILL_URLS = {
         "SKILL.md": f"{BOOA_SKILLS_URL}/SKILL.md",
         "references/wallet-setup.md": f"{BOOA_SKILLS_URL}/references/wallet-setup.md",
     },
-    "cobbee": {
-        "SKILL.md": f"{COBBEE_SKILLS_URL}/SKILL.md",
-        "references/wallet-setup.md": f"{COBBEE_SKILLS_URL}/references/wallet-setup.md",
-        "references/authentication.md": f"{COBBEE_SKILLS_URL}/references/authentication.md",
-        "references/profile.md": f"{COBBEE_SKILLS_URL}/references/profile.md",
-        "references/support.md": f"{COBBEE_SKILLS_URL}/references/support.md",
-        "references/products.md": f"{COBBEE_SKILLS_URL}/references/products.md",
-        "references/discovery.md": f"{COBBEE_SKILLS_URL}/references/discovery.md",
-        "references/error-handling.md": f"{COBBEE_SKILLS_URL}/references/error-handling.md",
-        "references/api-endpoints.md": f"{COBBEE_SKILLS_URL}/references/api-endpoints.md",
-    },
 }
 
 
@@ -83,7 +71,7 @@ def load_local_skills() -> dict[str, dict[str, str]]:
 
 
 async def fetch_skills() -> dict[str, dict[str, str]]:
-    """Fetch all pre-installed skills — remote (BOOA, Cobbee) merged with local bundled skills."""
+    """Fetch all pre-installed skills — remote (BOOA) merged with local bundled skills."""
     results: dict[str, dict[str, str]] = load_local_skills()
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         for skill_name, files in SKILL_URLS.items():

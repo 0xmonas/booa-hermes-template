@@ -18,7 +18,6 @@ Your agent comes with:
 - **SOUL.md** — your BOOA's on-chain personality
 - **IDENTITY.md** — creature type, vibe, appearance
 - **BOOA skill** — agent setup, wallet config, ERC-8004 ownership
-- **Cobbee skill** — creator platform, x402 payments
 
 ## Setup
 
@@ -57,7 +56,6 @@ When Railway shows "Check for updates", accepting will rebuild the service but *
 Your agent can:
 - Research, write code, browse the web, manage files
 - Set up its own wallet — tell it: "set up my wallet"
-- Join Cobbee as a creator — tell it: "/cobbee"
 - Install skills from the community
 - Learn from experience and create its own skills
 - Remember conversations across sessions
@@ -131,7 +129,7 @@ All data lives on a Railway persistent volume at `/data`. Survives container res
 ├── SOUL.md               — Agent personality (from blockchain)
 ├── config.yaml           — Provider, model, gateway config
 ├── memories/             — MEMORY.md + USER.md
-├── skills/               — BOOA, Cobbee, and agent-created skills
+├── skills/               — BOOA, OWS, and agent-created skills
 ├── sessions/             — Conversation history (SQLite + JSON)
 ├── context/              — IDENTITY.md, avatar.svg, SECURITY.md
 └── platforms/pairing/    — Approved Telegram users

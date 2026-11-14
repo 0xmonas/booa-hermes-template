@@ -98,7 +98,7 @@ def _render_status_md(state: WalletState) -> str:
             f"ERC-8004 agent #{state.agent_id or '?'}.\n\n"
             "The operator needs to register this wallet on 8004 via "
             "<https://8004scan.io/my-agents> → setAgentWallet. Until then, platforms "
-            "that check 8004 ownership (Cobbee, Moltbook) will reject this agent.\n"
+            "that check 8004 ownership will reject this agent.\n"
         ),
         "linked": (
             f"✅ Wallet {state.agent_wallet} is verified and linked to ERC-8004 agent "
